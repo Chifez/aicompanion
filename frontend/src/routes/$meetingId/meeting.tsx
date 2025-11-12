@@ -49,14 +49,14 @@ const INITIAL_PARTICIPANTS: Participant[] = [
     audioEnabled: true,
     videoEnabled: true,
   },
-  {
-    id: 'jordan',
-    name: 'Jordan Chen',
-    label: 'Product Lead',
-    avatar: 'https://avatar.vercel.sh/jordan',
-    audioEnabled: false,
-    videoEnabled: true,
-  },
+  // {
+  //   id: 'jordan',
+  //   name: 'Jordan Chen',
+  //   label: 'Product Lead',
+  //   avatar: 'https://avatar.vercel.sh/jordan',
+  //   audioEnabled: false,
+  //   videoEnabled: true,
+  // },
 ];
 
 const getParticipantStatus = (participant: Participant) =>

@@ -49,18 +49,18 @@ export class MeetingLayoutEngine {
       variant: 'single',
       containerClass: 'relative flex h-full w-full items-center justify-center',
       mainTileWrapperClass: isDesktop
-        ? 'w-[70vw] max-w-4xl'
+        ? 'w-[60vw] max-w-4xl'
         : 'w-full max-w-4xl',
       mainTileClass: `${BASE_TILE_CLASS} w-full ${
         isDesktop
-          ? 'aspect-video lg:min-h-[440px]'
+          ? 'aspect-[16/9] lg:min-h-full'
           : isTablet
             ? 'min-h-[62vh]'
-            : 'min-h-[75vh]'
+            : 'min-h-[75vh] '
       }`,
       floatingSelfWrapperClass: isDesktop
-        ? 'pointer-events-none absolute bottom-8 right-8 w-56'
-        : 'pointer-events-none absolute bottom-4 right-4 w-40',
+        ? 'pointer-events-none absolute bottom-2 right-2 w-71'
+        : 'pointer-events-none absolute bottom-2 right-2 w-40',
       floatingSelfTileClass: `${BASE_TILE_CLASS} aspect-video w-full`,
     };
   }
