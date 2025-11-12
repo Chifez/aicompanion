@@ -1,3 +1,4 @@
+import clsx from 'clsx';
 import {
   createFileRoute,
   Link,
@@ -41,6 +42,7 @@ import {
   SidebarProvider,
   SidebarSeparator,
   SidebarTrigger,
+  useSidebar,
 } from '@/components/ui/sidebar';
 import { useTheme } from '@/routes/__root';
 
@@ -79,32 +81,57 @@ export const Route = createFileRoute('/dashboard')({
 function DashboardLayout() {
   return (
     <SidebarProvider className="bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      <DashboardShell />
+    </SidebarProvider>
+  );
+}
+
+function DashboardShell() {
+  const { state } = useSidebar();
+  const isCollapsed = state !== 'expanded';
+
+  return (
+    <>
       <Sidebar
         collapsible="icon"
-        className="border-r border-slate-200/70 bg-white dark:border-slate-900/60 dark:bg-slate-950"
+        className="border-r border-slate-200/70 bg-white overflow-hidden dark:border-slate-900/60 dark:bg-slate-950"
       >
-        <SidebarHeader className="gap-4 px-4 py-6">
-          <div className="flex items-center gap-3">
+        <SidebarHeader
+          className={clsx(
+            'gap-4 px-4 py-6 bg-slate-50 dark:bg-slate-950 transition-colors',
+            isCollapsed && 'items-center'
+          )}
+        >
+          <div
+            className={clsx(
+              'flex items-center transition-all',
+              isCollapsed ? 'justify-center gap-0' : 'gap-3'
+            )}
+          >
             <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-sky-500 text-sm font-semibold text-slate-900">
               NL
             </span>
-            <div>
-              <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                NeuraLive
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Realtime Companion
-              </p>
-            </div>
+            {!isCollapsed && (
+              <div>
+                <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  NeuraLive
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Realtime Companion
+                </p>
+              </div>
+            )}
           </div>
-          <Badge
-            variant="outline"
-            className="bg-slate-100 text-xs text-slate-600 dark:bg-slate-900/60 dark:text-slate-300"
-          >
-            <Sparkle className="mr-1 h-3 w-3" /> Prototype
-          </Badge>
+          {!isCollapsed && (
+            <Badge
+              variant="outline"
+              className="bg-slate-100 text-xs text-slate-600 dark:bg-slate-900/60 dark:text-slate-300"
+            >
+              <Sparkle className="mr-1 h-3 w-3" /> Prototype
+            </Badge>
+          )}
         </SidebarHeader>
-        <SidebarContent>
+        <SidebarContent className="bg-slate-50 dark:bg-slate-950 overflow-x-hidden">
           <SidebarGroup>
             <SidebarGroupLabel>Workspace</SidebarGroupLabel>
             <SidebarGroupContent>
@@ -127,18 +154,20 @@ function DashboardLayout() {
                     <SidebarMenuButton
                       asChild
                       size="sm"
-                      className="justify-start gap-2 text-left text-xs text-slate-600 dark:text-slate-300"
+                      className="justify-start gap-2 text-left text-xs text-slate-600 transition-colors hover:bg-slate-200/70 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800/70 dark:hover:text-slate-100 data-[active=true]:bg-sky-500/20 data-[active=true]:text-sky-600 dark:data-[active=true]:bg-sky-500/25 dark:data-[active=true]:text-sky-200"
                     >
-                      <div className="flex w-full items-center gap-2 rounded-md border border-slate-200/70 bg-slate-100 px-2 py-2 dark:border-slate-800/60 dark:bg-slate-900/60">
+                      <div className="flex w-full items-center gap-2 rounded-md border border-slate-200/70 bg-slate-100 px-2 py-3 dark:border-slate-800/60 dark:bg-slate-900/60">
                         <CalendarClock className="h-4 w-4 text-slate-500" />
-                        <div className="flex flex-col">
-                          <span className="font-medium text-slate-800 dark:text-slate-200">
-                            {meeting.title}
-                          </span>
-                          <span className="text-[10px] text-slate-500">
-                            {meeting.time}
-                          </span>
-                        </div>
+                        {!isCollapsed && (
+                          <div className="flex flex-col">
+                            <span className="font-medium text-slate-800 dark:text-slate-200">
+                              {meeting.title}
+                            </span>
+                            <span className="text-[10px] text-slate-500">
+                              {meeting.time}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -147,55 +176,64 @@ function DashboardLayout() {
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
-        <SidebarFooter className="border-t border-slate-200/70 bg-white dark:border-slate-900/60 dark:bg-slate-900/70">
-          <div className="flex items-center justify-between rounded-lg border border-slate-200/70 bg-slate-100 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/70">
-            <div className="flex items-center gap-3">
-              <Avatar className="h-9 w-9 border border-slate-300 dark:border-slate-800">
-                <AvatarImage
-                  src="https://avatar.vercel.sh/user"
-                  alt="User avatar"
-                />
-                <AvatarFallback>A</AvatarFallback>
-              </Avatar>
-              <div className="grid leading-tight">
-                <span className="text-sm font-medium text-slate-800 dark:text-slate-100">
-                  Alex Rivera
-                </span>
-                <span className="text-xs text-slate-500">Product Lead</span>
-              </div>
-            </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-slate-600 dark:text-slate-300"
+        <SidebarFooter className="border-t border-slate-200/70 bg-white dark:border-slate-900/60 dark:bg-slate-950">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <div
+                className={clsx(
+                  'flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200/70 bg-slate-100 px-3 py-2 transition-colors hover:border-slate-300 hover:bg-slate-200/70 dark:border-transparent dark:bg-slate-900 dark:hover:bg-slate-900/80',
+                  isCollapsed ? 'justify-center' : 'justify-between'
+                )}
+              >
+                <div
+                  className={clsx(
+                    'flex items-center gap-3 transition-all',
+                    isCollapsed && 'justify-center gap-0'
+                  )}
                 >
-                  <Monitor className="h-4 w-4" />
-                  <span className="sr-only">Account menu</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-44">
-                <DropdownMenuLabel>Account</DropdownMenuLabel>
-                <DropdownMenuItem>Switch workspace</DropdownMenuItem>
-                <DropdownMenuItem>Notifications</DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem className="text-red-400 hover:text-red-300">
-                  Sign out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+                  <Avatar className="h-9 w-9 border border-slate-300 dark:border-slate-800">
+                    <AvatarImage
+                      src="https://avatar.vercel.sh/user"
+                      alt="User avatar"
+                    />
+                    <AvatarFallback>A</AvatarFallback>
+                  </Avatar>
+                  {!isCollapsed && (
+                    <div className="grid leading-tight">
+                      <span className="text-sm font-medium text-slate-800 dark:text-slate-100">
+                        Alex Rivera
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        Product Lead
+                      </span>
+                    </div>
+                  )}
+                </div>
+                {!isCollapsed && (
+                  <Monitor className="h-4 w-4 text-slate-500 dark:text-slate-300" />
+                )}
+              </div>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuLabel>Account</DropdownMenuLabel>
+              <DropdownMenuItem>Switch workspace</DropdownMenuItem>
+              <DropdownMenuItem>Notifications</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="text-red-400 hover:text-red-300">
+                Sign out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </SidebarFooter>
       </Sidebar>
 
       <SidebarInset className="bg-slate-50 dark:bg-slate-950">
-        <TopBar />
+        <DashboardTopBar />
         <div className="flex-1 overflow-y-auto px-6 pb-12 pt-6">
           <Outlet />
         </div>
       </SidebarInset>
-    </SidebarProvider>
+    </>
   );
 }
 
@@ -214,20 +252,22 @@ function SidebarNavItem({
 
   return (
     <SidebarMenuItem key={to}>
-      <SidebarMenuButton asChild isActive={isActive} tooltip={title}>
-        <Link
-          to={to}
-          className="flex items-center gap-3 text-slate-700 dark:text-slate-100"
-        >
+      <SidebarMenuButton
+        asChild
+        isActive={isActive}
+        tooltip={title}
+        className="group flex items-center gap-3 rounded-md px-2 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-200/80 hover:text-slate-900 dark:text-slate-200 dark:hover:bg-slate-800/70 dark:hover:text-slate-100 data-[active=true]:bg-sky-500/20 data-[active=true]:text-sky-600 dark:data-[active=true]:bg-sky-500/25 dark:data-[active=true]:text-sky-200"
+      >
+        <Link to={to} className="flex w-full items-center gap-3">
           <Icon className="h-4 w-4" />
-          <span>{title}</span>
+          <span className="group-data-[collapsible=icon]:hidden">{title}</span>
         </Link>
       </SidebarMenuButton>
     </SidebarMenuItem>
   );
 }
 
-function TopBar() {
+function DashboardTopBar() {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
 

@@ -9,7 +9,6 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as MeetingRouteImport } from './routes/meeting'
 import { Route as LobbyRouteImport } from './routes/lobby'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
@@ -17,12 +16,8 @@ import { Route as DashboardIndexRouteImport } from './routes/dashboard/index'
 import { Route as DashboardSettingsRouteImport } from './routes/dashboard/settings'
 import { Route as DashboardMeetingsRouteImport } from './routes/dashboard/meetings'
 import { Route as DashboardHistoryRouteImport } from './routes/dashboard/history'
+import { Route as MeetingIdMeetingRouteImport } from './routes/$meetingId/meeting'
 
-const MeetingRoute = MeetingRouteImport.update({
-  id: '/meeting',
-  path: '/meeting',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const LobbyRoute = LobbyRouteImport.update({
   id: '/lobby',
   path: '/lobby',
@@ -58,12 +53,17 @@ const DashboardHistoryRoute = DashboardHistoryRouteImport.update({
   path: '/history',
   getParentRoute: () => DashboardRoute,
 } as any)
+const MeetingIdMeetingRoute = MeetingIdMeetingRouteImport.update({
+  id: '/$meetingId/meeting',
+  path: '/$meetingId/meeting',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRouteWithChildren
   '/lobby': typeof LobbyRoute
-  '/meeting': typeof MeetingRoute
+  '/$meetingId/meeting': typeof MeetingIdMeetingRoute
   '/dashboard/history': typeof DashboardHistoryRoute
   '/dashboard/meetings': typeof DashboardMeetingsRoute
   '/dashboard/settings': typeof DashboardSettingsRoute
@@ -72,7 +72,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/lobby': typeof LobbyRoute
-  '/meeting': typeof MeetingRoute
+  '/$meetingId/meeting': typeof MeetingIdMeetingRoute
   '/dashboard/history': typeof DashboardHistoryRoute
   '/dashboard/meetings': typeof DashboardMeetingsRoute
   '/dashboard/settings': typeof DashboardSettingsRoute
@@ -83,7 +83,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRouteWithChildren
   '/lobby': typeof LobbyRoute
-  '/meeting': typeof MeetingRoute
+  '/$meetingId/meeting': typeof MeetingIdMeetingRoute
   '/dashboard/history': typeof DashboardHistoryRoute
   '/dashboard/meetings': typeof DashboardMeetingsRoute
   '/dashboard/settings': typeof DashboardSettingsRoute
@@ -95,7 +95,7 @@ export interface FileRouteTypes {
     | '/'
     | '/dashboard'
     | '/lobby'
-    | '/meeting'
+    | '/$meetingId/meeting'
     | '/dashboard/history'
     | '/dashboard/meetings'
     | '/dashboard/settings'
@@ -104,7 +104,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/lobby'
-    | '/meeting'
+    | '/$meetingId/meeting'
     | '/dashboard/history'
     | '/dashboard/meetings'
     | '/dashboard/settings'
@@ -114,7 +114,7 @@ export interface FileRouteTypes {
     | '/'
     | '/dashboard'
     | '/lobby'
-    | '/meeting'
+    | '/$meetingId/meeting'
     | '/dashboard/history'
     | '/dashboard/meetings'
     | '/dashboard/settings'
@@ -125,18 +125,11 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DashboardRoute: typeof DashboardRouteWithChildren
   LobbyRoute: typeof LobbyRoute
-  MeetingRoute: typeof MeetingRoute
+  MeetingIdMeetingRoute: typeof MeetingIdMeetingRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/meeting': {
-      id: '/meeting'
-      path: '/meeting'
-      fullPath: '/meeting'
-      preLoaderRoute: typeof MeetingRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/lobby': {
       id: '/lobby'
       path: '/lobby'
@@ -186,6 +179,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardHistoryRouteImport
       parentRoute: typeof DashboardRoute
     }
+    '/$meetingId/meeting': {
+      id: '/$meetingId/meeting'
+      path: '/$meetingId/meeting'
+      fullPath: '/$meetingId/meeting'
+      preLoaderRoute: typeof MeetingIdMeetingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -211,7 +211,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DashboardRoute: DashboardRouteWithChildren,
   LobbyRoute: LobbyRoute,
-  MeetingRoute: MeetingRoute,
+  MeetingIdMeetingRoute: MeetingIdMeetingRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -93,7 +93,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
   const hideFooter =
     pathname.startsWith('/dashboard') ||
     pathname.startsWith('/lobby') ||
-    pathname.startsWith('/meeting');
+    pathname.includes('/meeting');
 
   return (
     <html lang="en" className={theme === 'dark' ? 'dark' : ''}>

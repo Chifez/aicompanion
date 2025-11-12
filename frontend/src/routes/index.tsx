@@ -346,7 +346,7 @@ function Navbar() {
           </button>
           <Link
             to="/dashboard"
-            className="inline-flex items-center gap-2 rounded-full border border-slate-900/10 bg-slate-900 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-100 transition hover:bg-slate-800 dark:border-sky-500/30 dark:bg-sky-500 dark:text-slate-950 dark:hover:bg-sky-400"
+            className="inline-flex items-center gap-2 rounded-full border border-slate-900/10  px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-100 transition  dark:border-sky-500/30 bg-sky-500 dtext-slate-950 hover:bg-sky-400"
           >
             Dashboard
             <ArrowRight className="h-3.5 w-3.5" />

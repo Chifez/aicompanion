@@ -20,7 +20,6 @@ import {
   Camera,
   CheckCircle2,
   Loader2,
-  Mic,
   RefreshCcw,
 } from 'lucide-react';
 
@@ -190,7 +189,12 @@ function LobbyPage() {
           <Button
             disabled={!permissionsGranted}
             className="flex items-center gap-2 bg-sky-500 px-6 text-sm font-semibold text-slate-950 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:bg-slate-800/60 disabled:text-slate-500"
-            onClick={() => navigate({ to: '/meeting' })}
+            onClick={() =>
+              navigate({
+                to: '/$meetingId/meeting',
+                params: { meetingId: 'momentum-checkin' },
+              })
+            }
           >
             Join meeting
             {permissionsGranted ? (
