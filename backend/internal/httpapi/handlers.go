@@ -43,16 +43,24 @@ func (api *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := api.signUserJWT(session.User.ID)
+	sessionID, refreshToken, _, err := api.service.CreateSession(r.Context(), session.User.ID)
+	if err != nil {
+		api.respondError(w, http.StatusInternalServerError, "failed to create session")
+		return
+	}
+
+	accessToken, _, err := api.signAccessToken(session.User.ID, sessionID)
 	if err != nil {
 		api.logger.Printf("jwt signing error: %v", err)
-		api.respondError(w, http.StatusInternalServerError, "failed to issue token")
+		api.respondError(w, http.StatusInternalServerError, "failed to issue access token")
 		return
 	}
 
 	api.respondJSON(w, http.StatusOK, AuthLoginResponse{
-		Token:   token,
-		Session: *session,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		ExpiresIn:    int64(accessTokenTTL.Seconds()),
+		Session:      *session,
 	})
 }
 
@@ -73,17 +81,82 @@ func (api *API) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := api.signUserJWT(session.User.ID)
+	sessionID, refreshToken, _, err := api.service.CreateSession(r.Context(), session.User.ID)
+	if err != nil {
+		api.respondError(w, http.StatusInternalServerError, "failed to create session")
+		return
+	}
+
+	accessToken, _, err := api.signAccessToken(session.User.ID, sessionID)
 	if err != nil {
 		api.logger.Printf("jwt signing error: %v", err)
-		api.respondError(w, http.StatusInternalServerError, "failed to issue token")
+		api.respondError(w, http.StatusInternalServerError, "failed to issue access token")
 		return
 	}
 
 	api.respondJSON(w, http.StatusCreated, AuthRegisterResponse{
-		Token:   token,
-		Session: *session,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		ExpiresIn:    int64(accessTokenTTL.Seconds()),
+		Session:      *session,
 	})
+}
+
+func (api *API) handleRefresh(w http.ResponseWriter, r *http.Request) {
+	var req AuthRefreshRequest
+	if err := decodeJSON(r.Body, &req); err != nil {
+		api.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if !api.ensureService(w) {
+		return
+	}
+
+	sessionID, newRefreshToken, _, userID, err := api.service.RefreshSession(r.Context(), req.RefreshToken)
+	if err != nil {
+		api.respondServiceError(w, err)
+		return
+	}
+
+	session, err := api.service.GetAuthSession(r.Context(), userID)
+	if err != nil {
+		api.respondServiceError(w, err)
+		return
+	}
+
+	accessToken, _, err := api.signAccessToken(userID, sessionID)
+	if err != nil {
+		api.logger.Printf("jwt signing error: %v", err)
+		api.respondError(w, http.StatusInternalServerError, "failed to issue access token")
+		return
+	}
+
+	api.respondJSON(w, http.StatusOK, AuthRefreshResponse{
+		AccessToken:  accessToken,
+		RefreshToken: newRefreshToken,
+		ExpiresIn:    int64(accessTokenTTL.Seconds()),
+		Session:      *session,
+	})
+}
+
+func (api *API) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if !api.ensureService(w) {
+		return
+	}
+
+	sessionID := sessionIDFromContext(r.Context())
+	if strings.TrimSpace(sessionID) == "" {
+		api.respondError(w, http.StatusUnauthorized, "invalid session")
+		return
+	}
+
+	if err := api.service.RevokeSession(r.Context(), sessionID); err != nil {
+		api.respondServiceError(w, err)
+		return
+	}
+
+	api.respondJSON(w, http.StatusOK, AuthLogoutResponse{Message: "logged out"})
 }
 
 func (api *API) handleGetSession(w http.ResponseWriter, r *http.Request) {
@@ -431,13 +504,16 @@ func statusFromError(err error) int {
 	switch {
 	case strings.Contains(lower, "credentials"), strings.Contains(lower, "unauthorized"):
 		return http.StatusUnauthorized
+	case strings.Contains(lower, "refresh token"):
+		return http.StatusUnauthorized
 	case strings.Contains(lower, "not found"):
 		return http.StatusNotFound
 	case strings.Contains(lower, "conflict"),
 		strings.Contains(lower, "already"):
 		return http.StatusConflict
 	case strings.Contains(lower, "required"),
-		strings.Contains(lower, "invalid"):
+		strings.Contains(lower, "invalid"),
+		strings.Contains(lower, "must"):
 		return http.StatusBadRequest
 	default:
 		return http.StatusInternalServerError

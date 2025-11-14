@@ -14,7 +14,10 @@ type contextKey string
 
 const (
 	userIDContextKey contextKey = "userID"
+	sessionIDContextKey contextKey = "sessionID"
 )
+
+const accessTokenTTL = 15 * time.Minute
 
 func (api *API) authMiddleware(next http.Handler) http.Handler {
 	secret := api.cfg.JWTSecret
@@ -64,7 +67,30 @@ func (api *API) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		sessionID := strings.TrimSpace(claims.ID)
+		if sessionID == "" {
+			api.respondError(w, http.StatusUnauthorized, "invalid token")
+			return
+		}
+
+		if api.service == nil {
+			api.respondError(w, http.StatusServiceUnavailable, "service unavailable")
+			return
+		}
+
+		validatedUserID, err := api.service.ValidateSession(r.Context(), sessionID)
+		if err != nil {
+			api.respondError(w, http.StatusUnauthorized, "session expired")
+			return
+		}
+
+		if validatedUserID != userID {
+			api.respondError(w, http.StatusUnauthorized, "session expired")
+			return
+		}
+
 		ctx := context.WithValue(r.Context(), userIDContextKey, userID)
+		ctx = context.WithValue(ctx, sessionIDContextKey, sessionID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -79,19 +105,41 @@ func userIDFromContext(ctx context.Context) string {
 	return ""
 }
 
-func (api *API) signUserJWT(userID string) (string, error) {
+func sessionIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if val, ok := ctx.Value(sessionIDContextKey).(string); ok {
+		return val
+	}
+	return ""
+}
+
+func (api *API) signAccessToken(userID string, sessionID string) (string, time.Time, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
-		return "", fmt.Errorf("invalid user id")
+		return "", time.Time{}, fmt.Errorf("invalid user id")
 	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return "", time.Time{}, fmt.Errorf("invalid session id")
+	}
+
+	now := time.Now()
+	expiry := now.Add(accessTokenTTL)
 
 	claims := jwt.RegisteredClaims{
 		Subject:   userID,
+		ID:        sessionID,
 		Issuer:    "aicomp-backend",
-		IssuedAt:  jwt.NewNumericDate(time.Now()),
-		ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+		IssuedAt:  jwt.NewNumericDate(now),
+		ExpiresAt: jwt.NewNumericDate(expiry),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(api.cfg.JWTSecret))
+	signed, err := token.SignedString([]byte(api.cfg.JWTSecret))
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return signed, expiry, nil
 }

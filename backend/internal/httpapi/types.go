@@ -45,6 +45,9 @@ type (
 	AuthLoginResponse        = core.AuthLoginResponse
 	AuthRegisterRequest      = core.AuthRegisterRequest
 	AuthRegisterResponse     = core.AuthRegisterResponse
+	AuthRefreshRequest       = core.AuthRefreshRequest
+	AuthRefreshResponse      = core.AuthRefreshResponse
+	AuthLogoutResponse       = core.AuthLogoutResponse
 )
 
 type APIError struct {

@@ -2,6 +2,9 @@ package services
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strings"
@@ -19,6 +22,24 @@ type AppService struct {
 
 func NewAppService(db *pgxpool.Pool) *AppService {
 	return &AppService{db: db}
+}
+
+const (
+	accessTokenTTL  = 15 * time.Minute
+	refreshTokenTTL = 7 * 24 * time.Hour
+)
+
+func generateRandomHex(bytesLen int) (string, error) {
+	buf := make([]byte, bytesLen)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
+}
+
+func hashRefreshToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
 }
 
 func (s *AppService) ensureDB() error {
@@ -201,6 +222,168 @@ func (s *AppService) RegisterUser(ctx context.Context, req core.AuthRegisterRequ
 	}
 
 	return s.GetAuthSession(ctx, userID)
+}
+
+func (s *AppService) CreateSession(ctx context.Context, userID string) (string, string, time.Time, error) {
+	if err := s.ensureDB(); err != nil {
+		return "", "", time.Time{}, err
+	}
+
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return "", "", time.Time{}, fmt.Errorf("user id is required")
+	}
+
+	refreshToken, err := generateRandomHex(32)
+	if err != nil {
+		return "", "", time.Time{}, err
+	}
+
+	refreshHash := hashRefreshToken(refreshToken)
+	expiresAt := time.Now().Add(refreshTokenTTL)
+
+	var sessionID string
+	if err := s.db.QueryRow(ctx, `
+		INSERT INTO session_tokens (user_id, refresh_token_hash, expires_at)
+		VALUES ($1::uuid, $2, $3)
+		RETURNING id::text`,
+		userID,
+		refreshHash,
+		expiresAt,
+	).Scan(&sessionID); err != nil {
+		return "", "", time.Time{}, err
+	}
+
+	return sessionID, refreshToken, expiresAt, nil
+}
+
+func (s *AppService) RefreshSession(ctx context.Context, refreshToken string) (string, string, time.Time, string, error) {
+	if err := s.ensureDB(); err != nil {
+		return "", "", time.Time{}, "", err
+	}
+
+	refreshToken = strings.TrimSpace(refreshToken)
+	if refreshToken == "" {
+		return "", "", time.Time{}, "", fmt.Errorf("refresh token is required")
+	}
+
+	refreshHash := hashRefreshToken(refreshToken)
+
+	var (
+		sessionID string
+		userID    string
+		expiresAt time.Time
+		revoked   bool
+	)
+
+	err := s.db.QueryRow(ctx, `
+		SELECT id::text, user_id::text, expires_at, revoked
+		  FROM session_tokens
+		 WHERE refresh_token_hash = $1
+		 LIMIT 1`,
+		refreshHash,
+	).Scan(&sessionID, &userID, &expiresAt, &revoked)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return "", "", time.Time{}, "", fmt.Errorf("invalid refresh token")
+		}
+		return "", "", time.Time{}, "", err
+	}
+
+	if revoked || expiresAt.Before(time.Now()) {
+		_, _ = s.db.Exec(ctx, `
+			UPDATE session_tokens
+			   SET revoked = TRUE
+			 WHERE id::uuid = $1`, sessionID)
+		return "", "", time.Time{}, "", fmt.Errorf("invalid refresh token")
+	}
+
+	newRefreshToken, err := generateRandomHex(32)
+	if err != nil {
+		return "", "", time.Time{}, "", err
+	}
+
+	newHash := hashRefreshToken(newRefreshToken)
+	newExpires := time.Now().Add(refreshTokenTTL)
+
+	if _, err := s.db.Exec(ctx, `
+		UPDATE session_tokens
+		   SET refresh_token_hash = $1,
+		       expires_at = $2,
+		       revoked = FALSE
+		 WHERE id::uuid = $3`,
+		newHash,
+		newExpires,
+		sessionID,
+	); err != nil {
+		return "", "", time.Time{}, "", err
+	}
+
+	return sessionID, newRefreshToken, newExpires, userID, nil
+}
+
+func (s *AppService) RevokeSession(ctx context.Context, sessionID string) error {
+	if err := s.ensureDB(); err != nil {
+		return err
+	}
+
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return fmt.Errorf("session id is required")
+	}
+
+	result, err := s.db.Exec(ctx, `
+		UPDATE session_tokens
+		   SET revoked = TRUE
+		 WHERE id::uuid = $1`, sessionID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("session not found")
+	}
+	return nil
+}
+
+func (s *AppService) ValidateSession(ctx context.Context, sessionID string) (string, error) {
+	if err := s.ensureDB(); err != nil {
+		return "", err
+	}
+
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return "", fmt.Errorf("session id is required")
+	}
+
+	var (
+		userID    string
+		expiresAt time.Time
+		revoked   bool
+	)
+
+	err := s.db.QueryRow(ctx, `
+		SELECT user_id::text, expires_at, revoked
+		  FROM session_tokens
+		 WHERE id::uuid = $1
+		 LIMIT 1`,
+		sessionID,
+	).Scan(&userID, &expiresAt, &revoked)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return "", fmt.Errorf("session not found")
+		}
+		return "", err
+	}
+
+	if revoked {
+		return "", fmt.Errorf("session revoked")
+	}
+
+	if expiresAt.Before(time.Now()) {
+		return "", fmt.Errorf("session expired")
+	}
+
+	return userID, nil
 }
 
 func (s *AppService) GetDashboardOverview(ctx context.Context) (*core.DashboardOverviewResponse, error) {

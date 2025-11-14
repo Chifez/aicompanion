@@ -32,8 +32,10 @@ type AuthLoginRequest struct {
 }
 
 type AuthLoginResponse struct {
-	Token   string              `json:"token"`
-	Session AuthSessionResponse `json:"session"`
+	AccessToken  string              `json:"accessToken"`
+	RefreshToken string              `json:"refreshToken"`
+	ExpiresIn    int64               `json:"expiresIn"`
+	Session      AuthSessionResponse `json:"session"`
 }
 
 type AuthRegisterRequest struct {
@@ -43,8 +45,25 @@ type AuthRegisterRequest struct {
 }
 
 type AuthRegisterResponse struct {
-	Token   string              `json:"token"`
-	Session AuthSessionResponse `json:"session"`
+	AccessToken  string              `json:"accessToken"`
+	RefreshToken string              `json:"refreshToken"`
+	ExpiresIn    int64               `json:"expiresIn"`
+	Session      AuthSessionResponse `json:"session"`
+}
+
+type AuthRefreshRequest struct {
+	RefreshToken string `json:"refreshToken"`
+}
+
+type AuthRefreshResponse struct {
+	AccessToken  string              `json:"accessToken"`
+	RefreshToken string              `json:"refreshToken"`
+	ExpiresIn    int64               `json:"expiresIn"`
+	Session      AuthSessionResponse `json:"session"`
+}
+
+type AuthLogoutResponse struct {
+	Message string `json:"message"`
 }
 
 type DashboardSpotlight struct {

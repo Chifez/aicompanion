@@ -58,11 +58,13 @@ func (api *API) Routes() http.Handler {
 	router.Route("/api", func(r chi.Router) {
 		r.Post("/auth/register", api.handleRegister)
 		r.Post("/auth/login", api.handleLogin)
+		r.Post("/auth/refresh", api.handleRefresh)
 
 		r.Group(func(pr chi.Router) {
 			pr.Use(api.authMiddleware)
 
 			pr.Get("/auth/session", api.handleGetSession)
+			pr.Post("/auth/logout", api.handleLogout)
 			pr.Get("/dashboard/overview", api.handleGetDashboardOverview)
 
 			pr.Route("/meetings", func(r chi.Router) {
