@@ -1,0 +1,18 @@
+# Environment & secrets
+.env
+*.env
+*.env.*
+backend/.env
+frontend/.env
+
+# Local build artefacts
+/backend/bin/
+/backend/dist/
+/backend/coverage/
+/frontend/node_modules/
+/frontend/.turbo/
+*.log
+
+# OS/editor cruft
+.DS_Store
+Thumbs.db

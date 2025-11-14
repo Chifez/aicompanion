@@ -10,9 +10,13 @@ import (
 	"github.com/aicomp/ai-virtual-chat/backend/internal/config"
 	"github.com/aicomp/ai-virtual-chat/backend/internal/logger"
 	"github.com/aicomp/ai-virtual-chat/backend/internal/server"
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	_ = godotenv.Load(".env")
+	_ = godotenv.Load("../.env")
+
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
@@ -20,7 +24,10 @@ func main() {
 
 	logr := logger.New(cfg.Env)
 
-	httpServer := server.New(cfg, logr)
+	httpServer, err := server.New(cfg, logr)
+	if err != nil {
+		logr.Fatalf("failed to initialize server: %v", err)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -45,4 +52,3 @@ func main() {
 
 	logr.Println("server exited")
 }
-

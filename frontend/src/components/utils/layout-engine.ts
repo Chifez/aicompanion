@@ -56,10 +56,10 @@ export class MeetingLayoutEngine {
           ? 'aspect-[16/9] lg:min-h-full'
           : isTablet
             ? 'min-h-[62vh]'
-            : 'min-h-[75vh] '
+            : 'min-h-[75vh]'
       }`,
       floatingSelfWrapperClass: isDesktop
-        ? 'pointer-events-none absolute bottom-2 right-2 w-71'
+        ? 'pointer-events-none absolute bottom-4 right-4 w-71'
         : 'pointer-events-none absolute bottom-2 right-2 w-40',
       floatingSelfTileClass: `${BASE_TILE_CLASS} aspect-video w-full`,
     };
