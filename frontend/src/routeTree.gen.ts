@@ -9,6 +9,8 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as RegisterRouteImport } from './routes/register'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as LobbyRouteImport } from './routes/lobby'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
@@ -18,6 +20,16 @@ import { Route as DashboardMeetingsRouteImport } from './routes/dashboard/meetin
 import { Route as DashboardHistoryRouteImport } from './routes/dashboard/history'
 import { Route as MeetingIdMeetingRouteImport } from './routes/$meetingId/meeting'
 
+const RegisterRoute = RegisterRouteImport.update({
+  id: '/register',
+  path: '/register',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LobbyRoute = LobbyRouteImport.update({
   id: '/lobby',
   path: '/lobby',
@@ -63,6 +75,8 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRouteWithChildren
   '/lobby': typeof LobbyRoute
+  '/login': typeof LoginRoute
+  '/register': typeof RegisterRoute
   '/$meetingId/meeting': typeof MeetingIdMeetingRoute
   '/dashboard/history': typeof DashboardHistoryRoute
   '/dashboard/meetings': typeof DashboardMeetingsRoute
@@ -72,6 +86,8 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/lobby': typeof LobbyRoute
+  '/login': typeof LoginRoute
+  '/register': typeof RegisterRoute
   '/$meetingId/meeting': typeof MeetingIdMeetingRoute
   '/dashboard/history': typeof DashboardHistoryRoute
   '/dashboard/meetings': typeof DashboardMeetingsRoute
@@ -83,6 +99,8 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRouteWithChildren
   '/lobby': typeof LobbyRoute
+  '/login': typeof LoginRoute
+  '/register': typeof RegisterRoute
   '/$meetingId/meeting': typeof MeetingIdMeetingRoute
   '/dashboard/history': typeof DashboardHistoryRoute
   '/dashboard/meetings': typeof DashboardMeetingsRoute
@@ -95,6 +113,8 @@ export interface FileRouteTypes {
     | '/'
     | '/dashboard'
     | '/lobby'
+    | '/login'
+    | '/register'
     | '/$meetingId/meeting'
     | '/dashboard/history'
     | '/dashboard/meetings'
@@ -104,6 +124,8 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/lobby'
+    | '/login'
+    | '/register'
     | '/$meetingId/meeting'
     | '/dashboard/history'
     | '/dashboard/meetings'
@@ -114,6 +136,8 @@ export interface FileRouteTypes {
     | '/'
     | '/dashboard'
     | '/lobby'
+    | '/login'
+    | '/register'
     | '/$meetingId/meeting'
     | '/dashboard/history'
     | '/dashboard/meetings'
@@ -125,11 +149,27 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DashboardRoute: typeof DashboardRouteWithChildren
   LobbyRoute: typeof LobbyRoute
+  LoginRoute: typeof LoginRoute
+  RegisterRoute: typeof RegisterRoute
   MeetingIdMeetingRoute: typeof MeetingIdMeetingRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/register': {
+      id: '/register'
+      path: '/register'
+      fullPath: '/register'
+      preLoaderRoute: typeof RegisterRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/lobby': {
       id: '/lobby'
       path: '/lobby'
@@ -211,6 +251,8 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DashboardRoute: DashboardRouteWithChildren,
   LobbyRoute: LobbyRoute,
+  LoginRoute: LoginRoute,
+  RegisterRoute: RegisterRoute,
   MeetingIdMeetingRoute: MeetingIdMeetingRoute,
 }
 export const routeTree = rootRouteImport

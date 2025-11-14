@@ -4,9 +4,11 @@ import {
   createRootRoute,
   useRouterState,
 } from '@tanstack/react-router';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools';
 import { TanStackDevtools } from '@tanstack/react-devtools';
+import { NotFoundPage } from '@/features/shared/not-found-page';
 
 import appCss from '../styles.css?url';
 
@@ -50,6 +52,7 @@ export const Route = createRootRoute({
     ],
   }),
 
+  notFoundComponent: NotFoundPage,
   shellComponent: RootDocument,
 });
 
@@ -64,6 +67,17 @@ function RootDocument({ children }: { children: React.ReactNode }) {
     }
     return (window.localStorage.getItem('theme-preference') as Theme) ?? 'dark';
   });
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            refetchOnWindowFocus: false,
+            retry: 1,
+          },
+        },
+      })
+  );
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -93,7 +107,9 @@ function RootDocument({ children }: { children: React.ReactNode }) {
   const hideFooter =
     pathname.startsWith('/dashboard') ||
     pathname.startsWith('/lobby') ||
-    pathname.includes('/meeting');
+    pathname.includes('/meeting') ||
+    pathname.startsWith('/login') ||
+    pathname.startsWith('/register');
 
   return (
     <html lang="en" className={theme === 'dark' ? 'dark' : ''}>
@@ -104,47 +120,49 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         data-theme={theme}
         className="bg-slate-100 text-slate-900 transition-colors duration-300 dark:bg-slate-950 dark:text-slate-100"
       >
-        <ThemeContext.Provider value={value}>
-          <div className="min-h-screen flex flex-col">
-            <div className="grid-background pointer-events-none fixed inset-0 -z-10 opacity-20" />
-            <main className="flex-1">{children}</main>
-            {!hideFooter ? (
-              <footer className="border-t border-slate-200/70 bg-white/80 text-slate-500 backdrop-blur dark:border-slate-800/60 dark:bg-slate-950/80 dark:text-slate-400">
-                <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4 text-sm">
-                  <span>© {new Date().getFullYear()} NeuraLive Labs</span>
-                  <div className="flex items-center gap-4">
-                    <a
-                      href="#privacy"
-                      className="hover:text-slate-700 dark:hover:text-slate-200"
-                    >
-                      Privacy
-                    </a>
-                    <a
-                      href="#terms"
-                      className="hover:text-slate-700 dark:hover:text-slate-200"
-                    >
-                      Terms
-                    </a>
+        <QueryClientProvider client={queryClient}>
+          <ThemeContext.Provider value={value}>
+            <div className="min-h-screen flex flex-col">
+              <div className="grid-background pointer-events-none fixed inset-0 -z-10 opacity-20" />
+              <main className="flex-1">{children}</main>
+              {!hideFooter ? (
+                <footer className="border-t border-slate-200/70 bg-white/80 text-slate-500 backdrop-blur dark:border-slate-800/60 dark:bg-slate-950/80 dark:text-slate-400">
+                  <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4 text-sm">
+                    <span>© {new Date().getFullYear()} NeuraLive Labs</span>
+                    <div className="flex items-center gap-4">
+                      <a
+                        href="#privacy"
+                        className="hover:text-slate-700 dark:hover:text-slate-200"
+                      >
+                        Privacy
+                      </a>
+                      <a
+                        href="#terms"
+                        className="hover:text-slate-700 dark:hover:text-slate-200"
+                      >
+                        Terms
+                      </a>
+                    </div>
                   </div>
-                </div>
-              </footer>
-            ) : null}
-          </div>
-        </ThemeContext.Provider>
+                </footer>
+              ) : null}
+            </div>
+          </ThemeContext.Provider>
 
-        {isDev ? (
-          <TanStackDevtools
-            config={{
-              position: 'bottom-right',
-            }}
-            plugins={[
-              {
-                name: 'Tanstack Router',
-                render: <TanStackRouterDevtoolsPanel />,
-              },
-            ]}
-          />
-        ) : null}
+          {isDev ? (
+            <TanStackDevtools
+              config={{
+                position: 'bottom-right',
+              }}
+              plugins={[
+                {
+                  name: 'Tanstack Router',
+                  render: <TanStackRouterDevtoolsPanel />,
+                },
+              ]}
+            />
+          ) : null}
+        </QueryClientProvider>
         <Scripts />
       </body>
     </html>

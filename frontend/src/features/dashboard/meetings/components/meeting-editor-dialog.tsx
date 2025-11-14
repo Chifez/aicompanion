@@ -11,12 +11,24 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import type { ScheduledMeeting } from './meetings-sections';
+import { toDateTimeLocalValue } from '../utils/format';
+import type { MeetingFormState } from '../utils/transform';
 
-type MeetingFormState = Pick<
-  ScheduledMeeting,
-  'title' | 'description' | 'start' | 'duration' | 'voice'
->;
+const defaultMeeting: MeetingFormState = {
+  title: '',
+  description: '',
+  startTime: new Date().toISOString(),
+  durationMinutes: 30,
+  voiceProfile: '',
+};
+
+type MeetingEditorDialogProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  initialMeeting?: MeetingFormState | null;
+  onSubmit: (meeting: MeetingFormState) => void;
+  onDelete?: () => void;
+};
 
 export function MeetingEditorDialog({
   open,
@@ -24,38 +36,14 @@ export function MeetingEditorDialog({
   initialMeeting,
   onSubmit,
   onDelete,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  initialMeeting?: ScheduledMeeting | null;
-  onSubmit: (meeting: MeetingFormState) => void;
-  onDelete?: () => void;
-}) {
+}: MeetingEditorDialogProps) {
   const [form, setForm] = React.useState<MeetingFormState>(
-    initialMeeting ?? {
-      title: '',
-      description: '',
-      start: '',
-      duration: '',
-      voice: '',
-    }
+    initialMeeting ?? defaultMeeting
   );
 
   React.useEffect(() => {
-    setForm(
-      initialMeeting ?? {
-        title: '',
-        description: '',
-        start: '',
-        duration: '',
-        voice: '',
-      }
-    );
+    setForm(initialMeeting ?? defaultMeeting);
   }, [initialMeeting]);
-
-  const updateField = (field: keyof MeetingFormState) => (value: string) => {
-    setForm((previous) => ({ ...previous, [field]: value }));
-  };
 
   const isEditing = Boolean(initialMeeting);
 
@@ -75,7 +63,12 @@ export function MeetingEditorDialog({
           <Field label="Title">
             <Input
               value={form.title}
-              onChange={(event) => updateField('title')(event.target.value)}
+              onChange={(event) =>
+                setForm((previous) => ({
+                  ...previous,
+                  title: event.target.value,
+                }))
+              }
               placeholder="Morning momentum"
               className="border-slate-300 bg-white dark:border-slate-800 dark:bg-slate-900/40"
             />
@@ -84,7 +77,10 @@ export function MeetingEditorDialog({
             <Textarea
               value={form.description}
               onChange={(event) =>
-                updateField('description')(event.target.value)
+                setForm((previous) => ({
+                  ...previous,
+                  description: event.target.value,
+                }))
               }
               placeholder="Kickstart with tailored prompts and motivational check-in."
               className="h-24 resize-none border-slate-300 bg-white text-sm dark:border-slate-800 dark:bg-slate-900/40"
@@ -93,27 +89,45 @@ export function MeetingEditorDialog({
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Start time">
               <Input
-                value={form.start}
-                onChange={(event) => updateField('start')(event.target.value)}
-                placeholder="Tomorrow · 8:30 AM"
+                type="datetime-local"
+                value={toDateTimeLocalValue(form.startTime)}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setForm((previous) => ({
+                    ...previous,
+                    startTime: value
+                      ? new Date(value).toISOString()
+                      : previous.startTime,
+                  }));
+                }}
                 className="border-slate-300 bg-white dark:border-slate-800 dark:bg-slate-900/40"
               />
             </Field>
-            <Field label="Duration">
+            <Field label="Duration (minutes)">
               <Input
-                value={form.duration}
+                type="number"
+                min={5}
+                value={form.durationMinutes}
                 onChange={(event) =>
-                  updateField('duration')(event.target.value)
+                  setForm((previous) => ({
+                    ...previous,
+                    durationMinutes:
+                      Number(event.target.value) || previous.durationMinutes,
+                  }))
                 }
-                placeholder="25 mins"
                 className="border-slate-300 bg-white dark:border-slate-800 dark:bg-slate-900/40"
               />
             </Field>
           </div>
           <Field label="Voice & personality">
             <Input
-              value={form.voice}
-              onChange={(event) => updateField('voice')(event.target.value)}
+              value={form.voiceProfile}
+              onChange={(event) =>
+                setForm((previous) => ({
+                  ...previous,
+                  voiceProfile: event.target.value,
+                }))
+              }
               placeholder="Evelyn · Warm mentor"
               className="border-slate-300 bg-white dark:border-slate-800 dark:bg-slate-900/40"
             />
@@ -142,54 +156,6 @@ export function MeetingEditorDialog({
             }}
           >
             {isEditing ? 'Save changes' : 'Create meeting'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-export function TemplateLaunchDialog({
-  open,
-  onOpenChange,
-  template,
-  onLaunch,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  template: { id: string; title: string; description: string } | null;
-  onLaunch: () => void;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md space-y-4">
-        <DialogHeader>
-          <DialogTitle className="text-slate-900 dark:text-slate-100">
-            Launch template: {template?.title ?? 'Template'}
-          </DialogTitle>
-          <DialogDescription className="text-slate-600 dark:text-slate-400">
-            We’ll pre-configure the AI companion tone, prompts, and follow-up
-            cadence for this template.
-          </DialogDescription>
-        </DialogHeader>
-        <Textarea
-          value={template?.description ?? ''}
-          readOnly
-          className="h-32 resize-none border-slate-300 bg-white text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-200"
-        />
-        <DialogFooter>
-          <Button
-            variant="ghost"
-            className="text-slate-600 hover:text-slate-900 dark:text-slate-300"
-            onClick={() => onOpenChange(false)}
-          >
-            Cancel
-          </Button>
-          <Button
-            className="bg-sky-500 text-slate-950 hover:bg-sky-400"
-            onClick={onLaunch}
-          >
-            Launch session
           </Button>
         </DialogFooter>
       </DialogContent>

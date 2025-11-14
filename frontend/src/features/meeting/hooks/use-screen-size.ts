@@ -1,5 +1,5 @@
 import * as React from 'react';
-import type { ScreenSize } from '@/components/utils/layout-engine';
+import type { ScreenSize } from '../utils/layout-engine';
 
 export function useScreenSize(): ScreenSize {
   const [size, setSize] = React.useState<ScreenSize>(() =>
