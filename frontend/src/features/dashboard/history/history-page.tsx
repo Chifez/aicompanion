@@ -32,25 +32,6 @@ export function HistoryPage() {
 
   const transcriptsQuery = useTranscripts();
   const transcriptDetailQuery = useTranscriptDetail(replayTranscriptId);
-
-  if (transcriptsQuery.isLoading) {
-    return <HistorySkeleton />;
-  }
-
-  if (transcriptsQuery.isError) {
-    return (
-      <div className="mx-auto flex w-full max-w-4xl flex-col items-center justify-center gap-4 py-24 text-center text-slate-300">
-        <p className="text-lg font-semibold">
-          Unable to load transcript history.
-        </p>
-        <p className="text-sm text-slate-400">
-          {(transcriptsQuery.error as Error)?.message ??
-            'Please refresh the page or try again later.'}
-        </p>
-      </div>
-    );
-  }
-
   const transcriptRecords: TranscriptRecord[] = React.useMemo(
     () =>
       transcriptsQuery.data?.transcripts.map((transcript) => ({
@@ -77,6 +58,24 @@ export function HistoryPage() {
     searchQuery: search,
     filters,
   });
+
+  if (transcriptsQuery.isLoading) {
+    return <HistorySkeleton />;
+  }
+
+  if (transcriptsQuery.isError) {
+    return (
+      <div className="mx-auto flex w-full max-w-4xl flex-col items-center justify-center gap-4 py-24 text-center text-slate-300">
+        <p className="text-lg font-semibold">
+          Unable to load transcript history.
+        </p>
+        <p className="text-sm text-slate-400">
+          {(transcriptsQuery.error as Error)?.message ??
+            'Please refresh the page or try again later.'}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 text-slate-900 dark:text-slate-100">

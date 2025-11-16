@@ -12,12 +12,14 @@ import { useSettingsHandlers } from './hooks/use-settings-handlers';
 import type { Personality } from './types';
 import { useAuthStore } from '@/stores/auth-store';
 import { useDialogState } from '@/hooks/use-dialog-state';
+import { SettingsResponse } from '@/types/api';
 
 export function SettingsPage() {
   const sessionEmail = useAuthStore((state) => state.session?.user.email ?? '');
   const settingsQuery = useSettings();
   const presetsQuery = useVoicePresets();
 
+  // const settingsData = settingsQuery?.data ?? {};
   const presets = presetsQuery.data?.presets ?? [];
   const personalities: Personality[] = React.useMemo(
     () =>
@@ -39,6 +41,25 @@ export function SettingsPage() {
     );
     return match?.id ?? personalities[0]?.id ?? '';
   }, [personalities, presets, settingsQuery.data]);
+
+  const profileState = React.useMemo(
+    () => ({
+      name: settingsQuery?.data?.profile.displayName ?? '',
+      email: sessionEmail,
+      role: settingsQuery?.data?.profile.role ?? '',
+    }),
+    [settingsQuery.data, sessionEmail]
+  );
+
+  const {
+    handleProfileUpdate,
+    handleSelectPersonality,
+    handleToggleRecording,
+    handleToggleModelTraining,
+  } = useSettingsHandlers({
+    settings: settingsQuery.data ?? ({} as SettingsResponse),
+    presets,
+  });
 
   const presetsDialog = useDialogState(false);
   const lifecycleDialog = useDialogState(false);
@@ -63,24 +84,7 @@ export function SettingsPage() {
     );
   }
 
-  const profileState = React.useMemo(
-    () => ({
-      name: settingsQuery.data.profile.displayName,
-      email: sessionEmail,
-      role: settingsQuery.data.profile.role,
-    }),
-    [settingsQuery.data, sessionEmail]
-  );
-
-  const {
-    handleProfileUpdate,
-    handleSelectPersonality,
-    handleToggleRecording,
-    handleToggleModelTraining,
-  } = useSettingsHandlers({
-    settings: settingsQuery.data,
-    presets,
-  });
+  const settings = settingsQuery.data;
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 text-slate-900 dark:text-slate-100">
@@ -107,8 +111,8 @@ export function SettingsPage() {
       />
 
       <PrivacyCard
-        recordingEnabled={settingsQuery.data.privacy.recordingEnabled}
-        allowModelTraining={settingsQuery.data.privacy.allowModelTraining}
+        recordingEnabled={settings.privacy.recordingEnabled}
+        allowModelTraining={settings.privacy.allowModelTraining}
         onTogglePrivacy={handleToggleRecording}
         onToggleDownloads={handleToggleModelTraining}
       />
