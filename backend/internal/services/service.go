@@ -423,10 +423,42 @@ func (s *AppService) GetDashboardOverview(ctx context.Context) (*core.DashboardO
 		_ = s.db.QueryRow(ctx, `SELECT id::text FROM transcripts WHERE session_id::text = $1 LIMIT 1`, sessionID).Scan(&overview.Spotlight.TranscriptID)
 	}
 
+	// Get next meeting details for upcoming focus
+	var nextMeetingTitle string
+	var nextMeetingDuration int
+	var meetingFound bool
+	
+	nextMeetingTime := s.nextMeetingStart(ctx)
+	err = s.db.QueryRow(ctx, `
+		SELECT title, duration_minutes
+		FROM meetings
+		WHERE start_time >= NOW()
+		  AND status IN ('scheduled', 'instant')
+		ORDER BY start_time
+		LIMIT 1
+	`).Scan(&nextMeetingTitle, &nextMeetingDuration)
+	
+	meetingFound = (err == nil)
+	
+	// Only use defaults if a meeting was found but has missing data
+	if meetingFound {
+		if nextMeetingTitle == "" {
+			nextMeetingTitle = "Upcoming session"
+		}
+		// Only default duration if meeting exists but duration is 0 or null
+		if nextMeetingDuration == 0 {
+			nextMeetingDuration = 45
+		}
+	} else {
+		// No meeting found - use fallback values
+		nextMeetingTitle = "Upcoming session"
+		nextMeetingDuration = 45
+	}
+
 	overview.UpcomingFocus = core.DashboardUpcomingFocus{
-		FocusArea: "Quarterly momentum check-in",
-		StartTime: s.nextMeetingStart(ctx),
-		Duration:  45,
+		FocusArea: nextMeetingTitle,
+		StartTime: nextMeetingTime,
+		Duration:  nextMeetingDuration,
 	}
 
 	overview.Streak = s.sessionStreak(ctx)
@@ -442,6 +474,7 @@ func (s *AppService) nextMeetingStart(ctx context.Context) time.Time {
 		SELECT start_time
 		  FROM meetings
 		 WHERE start_time >= NOW()
+		   AND status IN ('scheduled', 'instant')
 		 ORDER BY start_time
 		 LIMIT 1`).Scan(&ts); err != nil || ts.IsZero() {
 		return time.Now().Add(6 * time.Hour)
@@ -464,13 +497,49 @@ func (s *AppService) sessionStreak(ctx context.Context) core.DashboardStreak {
 
 func (s *AppService) dashboardMetrics(ctx context.Context) []core.InsightMetric {
 	var sessionCount, highlightCount int
+	var sessionCountLastWeek, highlightCountLastWeek int
+
+	// Current week counts
 	_ = s.db.QueryRow(ctx, `SELECT COUNT(*) FROM sessions`).Scan(&sessionCount)
 	_ = s.db.QueryRow(ctx, `SELECT COUNT(*) FROM transcript_highlights`).Scan(&highlightCount)
 
+	// Last week counts (7-14 days ago)
+	_ = s.db.QueryRow(ctx, `
+		SELECT COUNT(*) FROM sessions 
+		WHERE started_at >= NOW() - INTERVAL '14 days' 
+		AND started_at < NOW() - INTERVAL '7 days'
+	`).Scan(&sessionCountLastWeek)
+	_ = s.db.QueryRow(ctx, `
+		SELECT COUNT(*) FROM transcript_highlights th
+		JOIN transcripts t ON t.id = th.transcript_id
+		JOIN sessions s ON s.id = t.session_id
+		WHERE s.started_at >= NOW() - INTERVAL '14 days' 
+		AND s.started_at < NOW() - INTERVAL '7 days'
+	`).Scan(&highlightCountLastWeek)
+
+	// Calculate deltas
+	sessionDelta := float64(sessionCount - sessionCountLastWeek)
+	highlightDelta := float64(highlightCount - highlightCountLastWeek)
+
+	// Determine direction
+	sessionDirection := "up"
+	if sessionDelta < 0 {
+		sessionDirection = "down"
+	} else if sessionDelta == 0 {
+		sessionDirection = "neutral"
+	}
+
+	highlightDirection := "up"
+	if highlightDelta < 0 {
+		highlightDirection = "down"
+	} else if highlightDelta == 0 {
+		highlightDirection = "neutral"
+	}
+
 	return []core.InsightMetric{
-		{ID: "sentiment", Label: "Sessions captured", Value: fmt.Sprintf("%d sessions", sessionCount), Delta: 12, Direction: "up"},
-		{ID: "context", Label: "Transcript insights", Value: fmt.Sprintf("%d highlights", highlightCount), Delta: 5, Direction: "up"},
-		{ID: "actions", Label: "Action follow-through", Value: "86%", Delta: -3, Direction: "down"},
+		{ID: "sentiment", Label: "Sessions captured", Value: fmt.Sprintf("%d sessions", sessionCount), Delta: sessionDelta, Direction: sessionDirection},
+		{ID: "context", Label: "Transcript insights", Value: fmt.Sprintf("%d highlights", highlightCount), Delta: highlightDelta, Direction: highlightDirection},
+		{ID: "actions", Label: "Action follow-through", Value: "86%", Delta: -3, Direction: "down"}, // Keep hardcoded until action_items table exists
 	}
 }
 
@@ -532,7 +601,7 @@ func (s *AppService) ListMeetings(ctx context.Context) (*core.MeetingsResponse, 
 			   COALESCE(voice_profile, ''),
 			   status
 		  FROM meetings
-		 ORDER BY start_time`)
+		 ORDER BY start_time DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -944,10 +1013,16 @@ func (s *AppService) CreateMeeting(ctx context.Context, req core.MeetingCreateRe
 	}
 	defer tx.Rollback(ctx)
 
+	// Determine status based on meeting type
+	status := "scheduled"
+	if req.IsInstant {
+		status = "instant"
+	}
+
 	var meetingID, slug string
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO meetings (external_id, title, description, host_user_id, ai_persona_id, start_time, duration_minutes, voice_profile, status)
-		VALUES ($1, $2, $3, $4::uuid, $5, $6, $7, $8, 'scheduled')
+		VALUES ($1, $2, $3, $4::uuid, $5, $6, $7, $8, $9)
 		RETURNING id::text, COALESCE(external_id, id::text)`,
 		externalID,
 		strings.TrimSpace(req.Title),
@@ -957,6 +1032,7 @@ func (s *AppService) CreateMeeting(ctx context.Context, req core.MeetingCreateRe
 		req.StartTime,
 		req.DurationMinutes,
 		strings.TrimSpace(req.VoiceProfile),
+		status,
 	).Scan(&meetingID, &slug); err != nil {
 		return nil, err
 	}

@@ -8,24 +8,27 @@ import { LifecycleDialog } from './components/lifecycle-dialog';
 import { SettingsSkeleton } from './components/settings-skeleton';
 import { useSettings } from './hooks/use-settings';
 import { useVoicePresets } from './hooks/use-voice-presets';
-import { useSettingsMutations } from './hooks/use-settings-mutations';
+import { useSettingsHandlers } from './hooks/use-settings-handlers';
 import type { Personality } from './types';
 import { useAuthStore } from '@/stores/auth-store';
-import type { SettingsUpdateRequest } from '@/types/api';
+import { useDialogState } from '@/hooks/use-dialog-state';
 
 export function SettingsPage() {
   const sessionEmail = useAuthStore((state) => state.session?.user.email ?? '');
   const settingsQuery = useSettings();
   const presetsQuery = useVoicePresets();
-  const { updateSettings } = useSettingsMutations();
 
   const presets = presetsQuery.data?.presets ?? [];
-  const personalities: Personality[] = presets.map((preset) => ({
-    id: preset.id,
-    label: preset.name,
-    tone: preset.tone || 'Custom tone',
-    defaultVoice: preset.voiceId,
-  }));
+  const personalities: Personality[] = React.useMemo(
+    () =>
+      presets.map((preset) => ({
+        id: preset.id,
+        label: preset.name,
+        tone: preset.tone || 'Custom tone',
+        defaultVoice: preset.voiceId,
+      })),
+    [presets]
+  );
 
   const activePresetId = React.useMemo(() => {
     if (!settingsQuery.data) {
@@ -37,8 +40,8 @@ export function SettingsPage() {
     return match?.id ?? personalities[0]?.id ?? '';
   }, [personalities, presets, settingsQuery.data]);
 
-  const [presetsOpen, setPresetsOpen] = React.useState(false);
-  const [lifecycleDialogOpen, setLifecycleDialogOpen] = React.useState(false);
+  const presetsDialog = useDialogState(false);
+  const lifecycleDialog = useDialogState(false);
   const [lifecycleAction, setLifecycleAction] = React.useState<
     'export' | 'reset' | 'delete' | null
   >(null);
@@ -60,73 +63,24 @@ export function SettingsPage() {
     );
   }
 
-  const profileState = {
-    name: settingsQuery.data.profile.displayName,
-    email: sessionEmail,
-    role: settingsQuery.data.profile.role,
-  };
+  const profileState = React.useMemo(
+    () => ({
+      name: settingsQuery.data.profile.displayName,
+      email: sessionEmail,
+      role: settingsQuery.data.profile.role,
+    }),
+    [settingsQuery.data, sessionEmail]
+  );
 
-  const handleProfileUpdate = (draft: {
-    name: string;
-    email: string;
-    role: string;
-  }) => {
-    const payload: SettingsUpdateRequest = {
-      profile: {
-        displayName: draft.name,
-        role: draft.role,
-      },
-    };
-    updateSettings.mutate(payload, {
-      onSuccess: () => {
-        const auth = useAuthStore.getState();
-        if (auth.session) {
-          useAuthStore.setState({
-            session: {
-              ...auth.session,
-              user: {
-                ...auth.session.user,
-                name: draft.name,
-              },
-            },
-          });
-        }
-      },
-    });
-  };
-
-  const handleSelectPersonality = (personality: Personality) => {
-    const preset = presets.find((item) => item.id === personality.id);
-    if (!preset) {
-      return;
-    }
-    const payload: SettingsUpdateRequest = {
-      personality: {
-        voicePreset: preset.name,
-        tone: preset.tone,
-        energy: preset.energy,
-      },
-    };
-    updateSettings.mutate(payload);
-  };
-
-  const handleToggleRecording = (value: boolean) => {
-    const payload: SettingsUpdateRequest = {
-      privacy: {
-        recordingEnabled: value,
-      },
-    };
-    updateSettings.mutate(payload);
-  };
-
-  const handleToggleModelTraining = (value: boolean) => {
-    const payload: SettingsUpdateRequest = {
-      privacy: {
-        allowModelTraining: value,
-      },
-    };
-    updateSettings.mutate(payload);
-  };
+  const {
+    handleProfileUpdate,
+    handleSelectPersonality,
+    handleToggleRecording,
+    handleToggleModelTraining,
+  } = useSettingsHandlers({
+    settings: settingsQuery.data,
+    presets,
+  });
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 text-slate-900 dark:text-slate-100">
@@ -149,7 +103,7 @@ export function SettingsPage() {
         personalities={personalities}
         activeId={activePresetId}
         onSelectPersonality={handleSelectPersonality}
-        onManagePresets={() => setPresetsOpen(true)}
+        onManagePresets={presetsDialog.openDialog}
       />
 
       <PrivacyCard
@@ -162,32 +116,32 @@ export function SettingsPage() {
       <DataLifecycleCard
         onExport={() => {
           setLifecycleAction('export');
-          setLifecycleDialogOpen(true);
+          lifecycleDialog.openDialog();
         }}
         onReset={() => {
           setLifecycleAction('reset');
-          setLifecycleDialogOpen(true);
+          lifecycleDialog.openDialog();
         }}
         onDelete={() => {
           setLifecycleAction('delete');
-          setLifecycleDialogOpen(true);
+          lifecycleDialog.openDialog();
         }}
       />
 
       <PresetsDialog
-        open={presetsOpen}
-        onOpenChange={setPresetsOpen}
-        presets={presets.map((preset) => preset.name)}
+        open={presetsDialog.open}
+        onOpenChange={presetsDialog.setOpen}
+        presets={presets}
       />
       <LifecycleDialog
-        open={lifecycleDialogOpen}
+        open={lifecycleDialog.open}
         onOpenChange={(open) => {
-          setLifecycleDialogOpen(open);
+          lifecycleDialog.setOpen(open);
           if (!open) setLifecycleAction(null);
         }}
         action={lifecycleAction}
         onConfirm={() => {
-          setLifecycleDialogOpen(false);
+          lifecycleDialog.closeDialog();
           setLifecycleAction(null);
         }}
       />

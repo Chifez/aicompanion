@@ -8,18 +8,9 @@ import {
 import { ControlBar } from './components/control-bar';
 import { ParticipantVideoTile } from './components/participant-video-tile';
 import { useScreenSize } from './hooks/use-screen-size';
+import { useMeetingDetail } from '@/features/dashboard/meetings/hooks/use-meeting-detail';
+import { useAuthStore } from '@/stores/auth-store';
 import type { Participant } from './types';
-
-const INITIAL_PARTICIPANTS: Participant[] = [
-  {
-    id: 'alex',
-    name: 'Alex Rivera',
-    label: 'You',
-    avatar: 'https://avatar.vercel.sh/you',
-    audioEnabled: true,
-    videoEnabled: true,
-  },
-];
 
 type MeetingRoomPageProps = {
   meetingId: string;
@@ -27,9 +18,55 @@ type MeetingRoomPageProps = {
 
 export function MeetingRoomPage({ meetingId }: MeetingRoomPageProps) {
   const screenSize = useScreenSize();
+  const user = useAuthStore((state) => state.session?.user);
+  const meetingDetailQuery = useMeetingDetail(meetingId);
 
-  const [participants, setParticipants] =
-    React.useState<Participant[]>(INITIAL_PARTICIPANTS);
+  const [participants, setParticipants] = React.useState<Participant[]>([]);
+  const [audioEnabled, setAudioEnabled] = React.useState(true);
+  const [videoEnabled, setVideoEnabled] = React.useState(true);
+
+  // Initialize self participant from user session
+  React.useEffect(() => {
+    if (user) {
+      setParticipants([
+        {
+          id: user.id,
+          name: user.name,
+          label: 'You',
+          avatar: user.avatarUrl || `https://avatar.vercel.sh/${user.id}`,
+          audioEnabled,
+          videoEnabled,
+        },
+      ]);
+    }
+  }, [user, audioEnabled, videoEnabled]);
+
+  // Load meeting details and AI presence
+  React.useEffect(() => {
+    if (meetingDetailQuery.data) {
+      // Add AI participant if meeting has voice profile
+      const voiceProfile = meetingDetailQuery.data.summary.voiceProfile;
+      if (voiceProfile) {
+        setParticipants((prev) => {
+          // Only add if not already present
+          if (prev.find((p) => p.id === 'ai')) {
+            return prev;
+          }
+          return [
+            ...prev,
+            {
+              id: 'ai',
+              name: voiceProfile.split(' · ')[0] || 'AI Companion',
+              label: 'AI',
+              avatar: 'https://avatar.vercel.sh/ai',
+              audioEnabled: true,
+              videoEnabled: false,
+            },
+          ];
+        });
+      }
+    }
+  }, [meetingDetailQuery.data]);
 
   const activeParticipants = React.useMemo(
     () => participants.slice(0, 2),
@@ -49,43 +86,31 @@ export function MeetingRoomPage({ meetingId }: MeetingRoomPageProps) {
     layout.variant === 'double' ? activeParticipants : [];
   const floatingParticipant =
     layout.variant === 'single' ? activeParticipants[0] : undefined;
-  const selfParticipant = participants.find((p) => p.id === 'alex');
+  const selfParticipant = participants.find((p) => p.id === user?.id);
 
   const formattedMeetingName = React.useMemo(
-    () =>
-      meetingId
-        .split('-')
-        .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-        .join(' '),
-    [meetingId]
+    () => meetingDetailQuery.data?.summary.title || meetingId,
+    [meetingDetailQuery.data, meetingId]
   );
 
-  const aiPresence = {
-    name: 'Aurora',
-    mood: 'Supportive',
-    voice: 'Evelyn · Warm Alto',
-    prompt:
-      '"Ready when you are. What would you like to focus on first today?"',
-  };
+  const aiPresence = React.useMemo(() => {
+    const voiceProfile = meetingDetailQuery.data?.summary.voiceProfile || '';
+    const parts = voiceProfile.split(' · ');
+    return {
+      name: parts[0] || 'Aurora',
+      mood: parts[1] || 'Supportive',
+      voice: voiceProfile || 'Evelyn · Warm Alto',
+      prompt:
+        '"Ready when you are. What would you like to focus on first today?"',
+    };
+  }, [meetingDetailQuery.data]);
 
   const handleToggleAudio = React.useCallback(() => {
-    setParticipants((prev) =>
-      prev.map((participant) =>
-        participant.id === 'alex'
-          ? { ...participant, audioEnabled: !participant.audioEnabled }
-          : participant
-      )
-    );
+    setAudioEnabled((prev) => !prev);
   }, []);
 
   const handleToggleVideo = React.useCallback(() => {
-    setParticipants((prev) =>
-      prev.map((participant) =>
-        participant.id === 'alex'
-          ? { ...participant, videoEnabled: !participant.videoEnabled }
-          : participant
-      )
-    );
+    setVideoEnabled((prev) => !prev);
   }, []);
 
   return (

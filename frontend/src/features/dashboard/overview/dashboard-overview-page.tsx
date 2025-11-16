@@ -7,7 +7,6 @@ import { RecentSessionsCard } from './components/recent-sessions-card';
 import { SessionStreakCard } from './components/session-streak-card';
 import { StartMeetingCta } from './components/start-meeting-cta';
 import { SessionDetailDialog } from './components/session-detail-dialog';
-import { LobbyNotesDialog } from './components/lobby-notes-dialog';
 import { DashboardOverviewSkeleton } from './components/dashboard-overview-skeleton';
 import { useDashboardOverview } from './hooks/use-dashboard-overview';
 import {
@@ -23,8 +22,6 @@ export function DashboardOverviewPage() {
   const [selectedSession, setSelectedSession] = React.useState<
     DashboardOverviewResponse['recentSessions'][number] | null
   >(null);
-  const [lobbyNotes, setLobbyNotes] = React.useState('');
-  const [isLobbyDialogOpen, setIsLobbyDialogOpen] = React.useState(false);
 
   const { data, isLoading, isError, error } = useDashboardOverview();
 
@@ -96,19 +93,12 @@ export function DashboardOverviewPage() {
         <SessionStreakCard streak={streak} />
       </section>
 
-      <StartMeetingCta onReviewLobby={() => setIsLobbyDialogOpen(true)} />
+      <StartMeetingCta />
 
       <SessionDetailDialog
         open={Boolean(selectedSession)}
         onOpenChange={(open) => !open && setSelectedSession(null)}
         session={selectedSession}
-      />
-
-      <LobbyNotesDialog
-        open={isLobbyDialogOpen}
-        onOpenChange={setIsLobbyDialogOpen}
-        notes={lobbyNotes}
-        onNotesChange={setLobbyNotes}
       />
     </div>
   );

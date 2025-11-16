@@ -1,13 +1,13 @@
-import { useNavigate } from '@tanstack/react-router';
 import { Mic, Video } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { useTheme } from '@/routes/__root';
 import { useAuthStore } from '@/stores/auth-store';
+import { useInstantMeeting } from '@/features/dashboard/meetings/hooks/use-instant-meeting';
 
 export function DashboardTopBar() {
-  const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
+  const { startInstantMeeting, isCreating } = useInstantMeeting();
   const userName = useAuthStore(
     (auth) => auth.session?.user?.name ?? 'NeuraLive Member'
   );
@@ -43,10 +43,11 @@ export function DashboardTopBar() {
           Audio check: Ready
         </Button>
         <Button
-          className="flex items-center gap-2 bg-sky-500 px-4 text-sm font-semibold text-slate-950 hover:bg-sky-400"
-          onClick={() => navigate({ to: '/lobby' })}
+          className="flex items-center gap-2 bg-sky-500 px-4 text-sm font-semibold text-slate-950 hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50"
+          onClick={startInstantMeeting}
+          disabled={isCreating}
         >
-          Start meeting
+          {isCreating ? 'Creating...' : 'Start meeting'}
           <Video className="h-4 w-4" />
         </Button>
       </div>

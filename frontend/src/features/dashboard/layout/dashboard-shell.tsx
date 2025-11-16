@@ -1,3 +1,4 @@
+import * as React from 'react';
 import clsx from 'clsx';
 import { Outlet, useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
@@ -12,7 +13,7 @@ import {
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,6 +40,8 @@ import {
 import { useAuthStore } from '@/stores/auth-store';
 import { DashboardTopBar } from './dashboard-top-bar';
 import { SidebarNavItem } from './sidebar-nav-item';
+import { useMeetings } from '@/features/dashboard/meetings/hooks/use-meetings';
+import { formatStartTime } from '@/features/dashboard/meetings/utils/format';
 
 const NAV_ITEMS = [
   {
@@ -63,11 +66,6 @@ const NAV_ITEMS = [
   },
 ];
 
-const UPCOMING_MEETINGS = [
-  { id: 'daily-standup', title: 'Focus Session', time: 'Today · 2:30 PM' },
-  { id: 'weekly-sync', title: 'Weekly Retro', time: 'Thu · 4:00 PM' },
-];
-
 export function DashboardShell() {
   const { state } = useSidebar();
   const isCollapsed = state !== 'expanded';
@@ -75,11 +73,30 @@ export function DashboardShell() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const logout = useAuthStore((auth) => auth.logout);
+  const meetingsQuery = useMeetings();
+
+  // Get upcoming meetings (next 2 scheduled meetings)
+  const upcomingMeetings = React.useMemo(() => {
+    if (!meetingsQuery.data?.scheduled) return [];
+    const now = new Date();
+    return meetingsQuery.data.scheduled
+      .filter((meeting) => new Date(meeting.startTime) > now)
+      .sort(
+        (a, b) =>
+          new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
+      )
+      .slice(0, 2)
+      .map((meeting) => ({
+        id: meeting.id,
+        title: meeting.title,
+        time: formatStartTime(meeting.startTime),
+      }));
+  }, [meetingsQuery.data]);
 
   const handleSignOut = async () => {
     await logout();
     await queryClient.clear();
-    navigate({ to: '/login' });
+    navigate({ to: '/login', search: { redirect: undefined } });
   };
 
   return (
@@ -141,29 +158,38 @@ export function DashboardShell() {
             <SidebarGroupLabel>Next up</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {UPCOMING_MEETINGS.map((meeting) => (
-                  <SidebarMenuItem key={meeting.id}>
-                    <SidebarMenuButton
-                      asChild
-                      size="sm"
-                      className="justify-start gap-2 text-left text-xs text-slate-600 transition-colors hover:bg-slate-200/70 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800/70 dark:hover:text-slate-100 data-[active=true]:bg-sky-500/20 data-[active=true]:text-sky-600 dark:data-[active=true]:bg-sky-500/25 dark:data-[active=true]:text-sky-200"
-                    >
-                      <div className="flex w-full items-center gap-2 rounded-md border border-slate-200/70 bg-slate-100 px-2 py-3 dark:border-slate-800/60 dark:bg-slate-900/60">
-                        <CalendarClock className="h-4 w-4 text-slate-500" />
-                        {!isCollapsed && (
-                          <div className="flex flex-col">
-                            <span className="font-medium text-slate-800 dark:text-slate-200">
-                              {meeting.title}
-                            </span>
-                            <span className="text-[10px] text-slate-500">
-                              {meeting.time}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    </SidebarMenuButton>
+                {upcomingMeetings.length === 0 ? (
+                  <SidebarMenuItem>
+                    <div className="flex w-full items-center gap-2 rounded-md border border-slate-200/70 bg-slate-100 px-2 py-3 text-xs text-slate-500 dark:border-slate-800/60 dark:bg-slate-900/60 dark:text-slate-400">
+                      {!isCollapsed && <span>No upcoming meetings</span>}
+                      {isCollapsed && <CalendarClock className="h-4 w-4" />}
+                    </div>
                   </SidebarMenuItem>
-                ))}
+                ) : (
+                  upcomingMeetings.map((meeting) => (
+                    <SidebarMenuItem key={meeting.id}>
+                      <SidebarMenuButton
+                        asChild
+                        size="sm"
+                        className="justify-start gap-2 text-left text-xs text-slate-600 transition-colors hover:bg-slate-200/70 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800/70 dark:hover:text-slate-100 data-[active=true]:bg-sky-500/20 data-[active=true]:text-sky-600 dark:data-[active=true]:bg-sky-500/25 dark:data-[active=true]:text-sky-200"
+                      >
+                        <div className="flex w-full items-center gap-2 rounded-md border border-slate-200/70 bg-slate-100 px-2 py-3 dark:border-slate-800/60 dark:bg-slate-900/60">
+                          <CalendarClock className="h-4 w-4 text-slate-500" />
+                          {!isCollapsed && (
+                            <div className="flex flex-col">
+                              <span className="font-medium text-slate-800 dark:text-slate-200">
+                                {meeting.title}
+                              </span>
+                              <span className="text-[10px] text-slate-500">
+                                {meeting.time}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))
+                )}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -173,8 +199,10 @@ export function DashboardShell() {
             <DropdownMenuTrigger asChild>
               <div
                 className={clsx(
-                  'flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200/70 bg-slate-100 px-3 py-2 transition-colors hover:border-slate-300 hover:bg-slate-200/70 dark:border-transparent dark:bg-slate-900 dark:hover:bg-slate-900/80',
-                  isCollapsed ? 'justify-center' : 'justify-between'
+                  'flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200/70 px-3 py-2 transition-colors hover:border-slate-300  dark:border-transparent ',
+                  isCollapsed
+                    ? 'justify-center'
+                    : 'justify-between bg-slate-100 dark:bg-slate-900 hover:bg-slate-200/70 dark:hover:bg-slate-900/80'
                 )}
               >
                 <div

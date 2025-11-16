@@ -8,6 +8,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools';
 import { TanStackDevtools } from '@tanstack/react-devtools';
+import { Toaster } from 'sonner';
 import { NotFoundPage } from '@/features/shared/not-found-page';
 
 import appCss from '../styles.css?url';
@@ -163,6 +164,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
             />
           ) : null}
         </QueryClientProvider>
+        <Toaster position="top-right" richColors />
         <Scripts />
       </body>
     </html>

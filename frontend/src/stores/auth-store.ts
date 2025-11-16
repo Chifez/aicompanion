@@ -43,6 +43,23 @@ function assertPassword(password: string) {
   }
 }
 
+function extractErrorMessage(error: any): string {
+  // Check if it's an axios error with a response
+  if (error?.response?.data?.message) {
+    return error.response.data.message;
+  }
+  // Check if it's an axios error with a different structure
+  if (error?.response?.data?.error) {
+    return error.response.data.error;
+  }
+  // Check if there's a message in the error itself
+  if (error?.message) {
+    return error.message;
+  }
+  // Default fallback
+  return 'An unexpected error occurred. Please try again.';
+}
+
 const useAuthStoreBase = create<AuthState>()(
   persist(
     (set, get) => ({
@@ -71,28 +88,38 @@ const useAuthStoreBase = create<AuthState>()(
       },
       login: async ({ email, password }) => {
         assertPassword(password);
-        const { data } = await authClient.post<AuthLoginResponse>(
-          '/auth/login',
-          {
-            email,
-            password,
-          }
-        );
-        get().setAuth(data);
-        return data.session;
+        try {
+          const { data } = await authClient.post<AuthLoginResponse>(
+            '/auth/login',
+            {
+              email,
+              password,
+            }
+          );
+          get().setAuth(data);
+          return data.session;
+        } catch (error: any) {
+          const errorMessage = extractErrorMessage(error);
+          throw new Error(errorMessage);
+        }
       },
       register: async ({ name, email, password }) => {
         assertPassword(password);
-        const { data } = await authClient.post<AuthRegisterResponse>(
-          '/auth/register',
-          {
-            name,
-            email,
-            password,
-          }
-        );
-        get().setAuth(data);
-        return data.session;
+        try {
+          const { data } = await authClient.post<AuthRegisterResponse>(
+            '/auth/register',
+            {
+              name,
+              email,
+              password,
+            }
+          );
+          get().setAuth(data);
+          return data.session;
+        } catch (error: any) {
+          const errorMessage = extractErrorMessage(error);
+          throw new Error(errorMessage);
+        }
       },
       refreshTokens: async () => {
         const state = get();
@@ -135,17 +162,13 @@ const useAuthStoreBase = create<AuthState>()(
         session: state.session,
       }),
       onRehydrateStorage: () => {
-        return (_, error) => {
+        return (_state, error) => {
+          const store = useAuthStoreBase.getState();
           if (error) {
-            set({
-              accessToken: null,
-              refreshToken: null,
-              expiresAt: null,
-              session: null,
-              isHydrated: true,
-            });
+            store.clearAuth();
+            useAuthStoreBase.setState({ isHydrated: true });
           } else {
-            set({ isHydrated: true });
+            useAuthStoreBase.setState({ isHydrated: true });
           }
         };
       },
@@ -160,10 +183,7 @@ let refreshPromise: Promise<string> | null = null;
 apiClient.interceptors.request.use((config) => {
   const token = useAuthStore.getState().accessToken;
   if (token) {
-    config.headers = {
-      ...config.headers,
-      Authorization: `Bearer ${token}`,
-    };
+    config.headers.set('Authorization', `Bearer ${token}`);
   }
   return config;
 });
@@ -199,10 +219,10 @@ apiClient.interceptors.response.use(
           throw new Error('Unable to refresh session');
         }
         originalRequest._retry = true;
-        originalRequest.headers = {
-          ...originalRequest.headers,
-          Authorization: `Bearer ${newAccessToken}`,
-        };
+        originalRequest.headers.set(
+          'Authorization',
+          `Bearer ${newAccessToken}`
+        );
         return apiClient(originalRequest);
       } catch (refreshError) {
         useAuthStore.getState().clearAuth();

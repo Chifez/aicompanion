@@ -185,6 +185,38 @@ export type VoicePresetsResponse = {
   presets: VoicePreset[];
 };
 
+export type CreateVoicePresetRequest = {
+  name: string;
+  voiceId: string;
+  tone: string;
+  energy: string;
+  sampleUrl: string;
+};
+
+export type UpdateVoicePresetRequest = {
+  name?: string;
+  voiceId?: string;
+  tone?: string;
+  energy?: string;
+  sampleUrl?: string;
+  isDefault?: boolean;
+};
+
+export type MeetingCreateRequest = {
+  title: string;
+  description: string;
+  startTime: string;
+  durationMinutes: number;
+  voiceProfile: string;
+  aiPersonaId?: string;
+  agenda?: Array<{
+    title: string;
+    description: string;
+    durationMinutes: number;
+  }>;
+  isInstant?: boolean;
+};
+
 export type AuthResponseBase = {
   accessToken: string;
   refreshToken: string;

@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useNavigate } from '@tanstack/react-router';
 import { MessageCircle, Waves } from 'lucide-react';
 import { ScheduledMeetingsCard } from './components/scheduled-meetings-card';
 import { SessionHealthCard } from './components/session-health-card';
@@ -17,6 +18,7 @@ import {
 import type { MeetingsResponse } from '@/types/api';
 
 export function MeetingsPage() {
+  const navigate = useNavigate();
   const [editorOpen, setEditorOpen] = React.useState(false);
   const [templateDialogOpen, setTemplateDialogOpen] = React.useState(false);
   const [selectedMeeting, setSelectedMeeting] =
@@ -52,9 +54,25 @@ export function MeetingsPage() {
 
   const handleSubmitDraft = (draft: MeetingFormState) => {
     if (selectedMeeting) {
-      updateMeeting.mutate({ id: selectedMeeting.id, draft });
+      // Updating existing meeting - just save, no redirect
+      updateMeeting.mutate(
+        { id: selectedMeeting.id, draft },
+        {
+          onSuccess: () => {
+            setEditorOpen(false);
+            setSelectedMeeting(null);
+          },
+        }
+      );
     } else {
-      createMeeting.mutate(draft);
+      // Creating new scheduled meeting - just save, no redirect
+      // User will need to click "Start meeting" button on the card to go to lobby
+      createMeeting.mutate(draft, {
+        onSuccess: () => {
+          // Just close the dialog, meeting will appear in the list
+          setEditorOpen(false);
+        },
+      });
     }
   };
 
@@ -74,8 +92,20 @@ export function MeetingsPage() {
       durationMinutes: 30,
       voiceProfile: 'Aurora · Creative Lead',
     };
-    createMeeting.mutate(draft);
-    setTemplateDialogOpen(false);
+    // Templates create scheduled meetings - no redirect, user clicks "Start meeting" to go to lobby
+    createMeeting.mutate(draft, {
+      onSuccess: () => {
+        // Just close the dialog, meeting will appear in the list
+        setTemplateDialogOpen(false);
+      },
+    });
+  };
+
+  const handleStartMeeting = (meeting: ScheduledMeeting) => {
+    navigate({
+      to: '/lobby',
+      search: { meetingId: meeting.id },
+    });
   };
 
   if (meetingsQuery.isLoading) {
@@ -117,6 +147,7 @@ export function MeetingsPage() {
             setSelectedMeeting(meeting);
             setEditorOpen(true);
           }}
+          onStart={handleStartMeeting}
         />
 
         <SessionHealthCard healthItems={healthItems} />

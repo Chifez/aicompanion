@@ -1,5 +1,10 @@
 import { useState } from 'react';
-import { createFileRoute, Link, redirect } from '@tanstack/react-router';
+import {
+  createFileRoute,
+  Link,
+  redirect,
+  useNavigate,
+} from '@tanstack/react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Loader2, Chrome, Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -24,7 +29,7 @@ export const Route = createFileRoute('/register')({
     const auth = useAuthStore.getState();
     if (auth.isAuthenticated()) {
       const redirectPath =
-        typeof search.redirect === 'string' ? search.redirect : '/dashboard/';
+        typeof search.redirect === 'string' ? search.redirect : '/dashboard';
       throw redirect({ to: redirectPath });
     }
   },
@@ -33,6 +38,7 @@ export const Route = createFileRoute('/register')({
 
 function RegisterPage() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const search = Route.useSearch();
   const redirectTo =
     typeof search.redirect === 'string' ? search.redirect : undefined;
@@ -50,11 +56,10 @@ function RegisterPage() {
     mutationFn: () => register({ name, email, password }),
     onSuccess: async () => {
       await queryClient.invalidateQueries();
-      // Ensure we navigate to the correct path
+      // Navigate to the correct path using router
       const targetPath =
-        redirectTo && redirectTo.startsWith('/') ? redirectTo : '/dashboard/';
-      // Use window.location for reliable navigation after auth state update
-      window.location.href = targetPath;
+        redirectTo && redirectTo.startsWith('/') ? redirectTo : '/dashboard';
+      navigate({ to: targetPath });
     },
   });
 
@@ -80,13 +85,12 @@ function RegisterPage() {
             <Button
               type="button"
               variant="outline"
-              className="flex w-full items-center justify-center gap-2 border-slate-700 bg-transparent text-slate-100 hover:bg-slate-800"
-              onClick={() => {
-                window.open('/auth/google', '_self');
-              }}
+              disabled
+              className="flex w-full items-center justify-center gap-2 border-slate-700 bg-transparent text-slate-100 opacity-50 cursor-not-allowed"
+              title="Google authentication is not yet implemented"
             >
               <Chrome className="h-4 w-4" />
-              Sign up with Google
+              Sign up with Google (Coming soon)
             </Button>
             <div className="flex items-center gap-4 text-xs uppercase tracking-[0.3em] text-slate-500">
               <div className="h-px flex-1 bg-slate-700" />

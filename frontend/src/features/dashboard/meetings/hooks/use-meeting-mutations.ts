@@ -14,7 +14,7 @@ export function useMeetingMutations() {
   const queryClient = useQueryClient();
 
   const createMeeting = useMutation({
-    mutationFn: async (draft: MeetingFormState) => {
+    mutationFn: async (draft: MeetingFormState & { isInstant?: boolean }) => {
       const payload = {
         title: draft.title,
         description: draft.description,
@@ -27,6 +27,8 @@ export function useMeetingMutations() {
           description: string;
           durationMinutes: number;
         }[],
+        // Add flag to indicate instant meeting
+        isInstant: draft.isInstant ?? false,
       };
       const response = await apiClient.post<{ meeting: MeetingDetail }>(
         '/meetings',
@@ -36,6 +38,9 @@ export function useMeetingMutations() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['meetings'] });
+      void queryClient.invalidateQueries({
+        queryKey: ['dashboard', 'overview'],
+      });
     },
   });
 

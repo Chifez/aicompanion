@@ -187,6 +187,7 @@ type MeetingCreateRequest struct {
 	VoiceProfile    string       `json:"voiceProfile"`
 	AiPersonaID     string       `json:"aiPersonaId"`
 	Agenda          []AgendaItem `json:"agenda"`
+	IsInstant       bool         `json:"isInstant,omitempty"`
 }
 
 type MeetingUpdateRequest struct {

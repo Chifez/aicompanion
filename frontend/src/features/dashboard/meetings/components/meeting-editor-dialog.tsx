@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { toDateTimeLocalValue } from '../utils/format';
 import type { MeetingFormState } from '../utils/transform';
+import { useSyncFormState } from '@/hooks/use-sync-form-state';
 
 const defaultMeeting: MeetingFormState = {
   title: '',
@@ -37,13 +38,7 @@ export function MeetingEditorDialog({
   onSubmit,
   onDelete,
 }: MeetingEditorDialogProps) {
-  const [form, setForm] = React.useState<MeetingFormState>(
-    initialMeeting ?? defaultMeeting
-  );
-
-  React.useEffect(() => {
-    setForm(initialMeeting ?? defaultMeeting);
-  }, [initialMeeting]);
+  const [form, setForm] = useSyncFormState(initialMeeting, defaultMeeting);
 
   const isEditing = Boolean(initialMeeting);
 
