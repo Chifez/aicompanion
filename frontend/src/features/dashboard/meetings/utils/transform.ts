@@ -8,6 +8,8 @@ export type ScheduledMeeting = {
   durationMinutes: number;
   voiceProfile: string;
   status: string;
+  visibility?: string;
+  hostUserId?: string;
 };
 
 export type MeetingFormState = {
@@ -16,6 +18,8 @@ export type MeetingFormState = {
   startTime: string;
   durationMinutes: number;
   voiceProfile: string;
+  visibility?: 'private' | 'public';
+  inviteEmails?: string;
 };
 
 export function toScheduledMeeting(
@@ -29,6 +33,8 @@ export function toScheduledMeeting(
     durationMinutes: meeting.durationMinutes,
     voiceProfile: meeting.voiceProfile,
     status: meeting.status,
+    visibility: meeting.visibility,
+    hostUserId: (meeting as any).hostUserId,
   };
 }
 

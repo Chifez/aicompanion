@@ -8,6 +8,8 @@ export type MeetingFormState = {
   startTime: string;
   durationMinutes: number;
   voiceProfile: string;
+  visibility?: 'private' | 'public';
+  inviteEmails?: string;
 };
 
 export function useMeetingMutations() {
@@ -29,6 +31,7 @@ export function useMeetingMutations() {
         }[],
         // Add flag to indicate instant meeting
         isInstant: draft.isInstant ?? false,
+        visibility: draft.visibility ?? 'private',
       };
       const response = await apiClient.post<{ meeting: MeetingDetail }>(
         '/meetings',
@@ -85,5 +88,20 @@ export function useMeetingMutations() {
     },
   });
 
-  return { createMeeting, updateMeeting, deleteMeeting };
+  const startMeeting = useMutation({
+    mutationFn: async (id: string) => {
+      const response = await apiClient.post<{ meeting: MeetingDetail }>(
+        `/meetings/${id}/start`
+      );
+      return response.data.meeting;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['meetings'] });
+      void queryClient.invalidateQueries({
+        queryKey: ['dashboard', 'overview'],
+      });
+    },
+  });
+
+  return { createMeeting, updateMeeting, deleteMeeting, startMeeting };
 }

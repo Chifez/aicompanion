@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/card';
 import { formatDuration, formatStartTime } from '../utils/format';
 import type { ScheduledMeeting } from '../utils/transform';
+import { Badge } from '@/components/ui/badge';
 
 type ScheduledMeetingsCardProps = {
   meetings: ScheduledMeeting[];
@@ -91,6 +92,22 @@ export function ScheduledMeetingsCard({
                 </div>
               </div>
               <div className="mt-4">
+                <div className="mb-2 flex items-center gap-2">
+                  {meeting.visibility && (
+                    <Badge
+                      variant="outline"
+                      className="border-slate-300 text-xs text-slate-600 dark:border-slate-700 dark:text-slate-300"
+                    >
+                      {meeting.visibility === 'public' ? 'public' : 'private'}
+                    </Badge>
+                  )}
+                  <Badge
+                    variant="outline"
+                    className="border-slate-300 text-xs text-slate-600 dark:border-slate-700 dark:text-slate-300"
+                  >
+                    {meeting.status}
+                  </Badge>
+                </div>
                 <Button
                   size="sm"
                   className="w-full inline-flex items-center justify-center gap-1 bg-sky-500 text-slate-950 hover:bg-sky-400 sm:w-auto"

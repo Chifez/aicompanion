@@ -8,6 +8,7 @@ const baseUrl =
 
 export const apiClient = axios.create({
   baseURL: `${baseUrl}/api`,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -15,6 +16,7 @@ export const apiClient = axios.create({
 
 export const authClient = axios.create({
   baseURL: `${baseUrl}/api`,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },

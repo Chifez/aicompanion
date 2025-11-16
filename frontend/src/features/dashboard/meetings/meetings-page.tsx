@@ -102,6 +102,7 @@ export function MeetingsPage() {
   };
 
   const handleStartMeeting = (meeting: ScheduledMeeting) => {
+    // Just take the host into the lobby; status will flip to active when they join from the lobby
     navigate({
       to: '/lobby',
       search: { meetingId: meeting.id },

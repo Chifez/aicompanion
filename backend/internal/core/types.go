@@ -119,6 +119,8 @@ type MeetingSummary struct {
 	DurationMinutes int       `json:"durationMinutes"`
 	VoiceProfile    string    `json:"voiceProfile"`
 	Status          string    `json:"status"`
+	Visibility      string    `json:"visibility,omitempty"`
+	HostUserID      string    `json:"hostUserId,omitempty"`
 }
 
 type MeetingParticipant struct {
@@ -188,6 +190,7 @@ type MeetingCreateRequest struct {
 	AiPersonaID     string       `json:"aiPersonaId"`
 	Agenda          []AgendaItem `json:"agenda"`
 	IsInstant       bool         `json:"isInstant,omitempty"`
+	Visibility      string       `json:"visibility,omitempty"` // private | public
 }
 
 type MeetingUpdateRequest struct {
@@ -207,11 +210,31 @@ type MeetingDetailResponse struct {
 type MeetingJoinResponse struct {
 	MeetingID       string          `json:"meetingId"`
 	ParticipantID   string          `json:"participantId"`
-	WebRTCToken     string          `json:"webRtcToken"`
-	AIRealtimeToken string          `json:"aiRealtimeToken"`
+	WebRTCToken     string          `json:"webRtcToken"`     // legacy field
+	AIRealtimeToken string          `json:"aiRealtimeToken"` // legacy field
 	ExpiresAt       time.Time       `json:"expiresAt"`
-	VoiceSynthToken string          `json:"voiceSynthToken"`
+	VoiceSynthToken string          `json:"voiceSynthToken"` // legacy field
 	TurnCredentials TurnCredentials `json:"turnCredentials"`
+	// Future: LiveKit integration
+	LiveKitToken string `json:"livekitToken,omitempty"`
+	LiveKitURL   string `json:"livekitUrl,omitempty"`
+}
+
+type MeetingInvite struct {
+	ID        string    `json:"id"`
+	MeetingID string    `json:"meetingId"`
+	Email     string    `json:"email"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type CreateMeetingInvitesRequest struct {
+	Emails []string `json:"emails"`
+}
+
+type MeetingInvitesResponse struct {
+	Invites []MeetingInvite `json:"invites"`
 }
 
 type TurnCredentials struct {

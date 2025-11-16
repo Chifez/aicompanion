@@ -47,10 +47,13 @@ func (api *API) Routes() http.Handler {
 	router.Use(middleware.Recoverer)
 	router.Use(middleware.Timeout(60 * time.Second))
 	router.Use(cors.Handler(cors.Options{
-		AllowedOrigins: []string{"*"},
-		AllowedMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders: []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
-		MaxAge:         300,
+		// In development, allow the Vite/React dev server origins.
+		// In production, this should be restricted to your real frontend origin.
+		AllowedOrigins:   []string{"http://localhost:3000", "http://localhost:5173"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+		AllowCredentials: true,
+		MaxAge:           300,
 	}))
 
 	router.Get("/healthz", api.handleHealth)
@@ -75,6 +78,7 @@ func (api *API) Routes() http.Handler {
 					r.Get("/", api.handleGetMeeting)
 					r.Patch("/", api.handleUpdateMeeting)
 					r.Delete("/", api.handleDeleteMeeting)
+					r.Post("/start", api.handleStartMeeting)
 					r.Post("/join", api.handleJoinMeeting)
 				})
 			})

@@ -43,7 +43,7 @@ func (api *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionID, refreshToken, _, err := api.service.CreateSession(r.Context(), session.User.ID)
+	sessionID, refreshToken, refreshExpiresAt, err := api.service.CreateSession(r.Context(), session.User.ID)
 	if err != nil {
 		api.respondError(w, http.StatusInternalServerError, "failed to create session")
 		return
@@ -55,6 +55,19 @@ func (api *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 		api.respondError(w, http.StatusInternalServerError, "failed to issue access token")
 		return
 	}
+
+	// Set HttpOnly refresh token cookie (browser-side storage)
+	http.SetCookie(w, &http.Cookie{
+		Name:     "nl_refresh",
+		Value:    refreshToken,
+		Path:     "/", // send on all requests to this host
+		HttpOnly: true,
+		// For cross-site XHR/fetch from http://localhost:3000 to http://localhost:8080
+		// we need SameSite=None and Secure=true so the cookie is included.
+		Secure:   true,
+		SameSite: http.SameSiteNoneMode,
+		Expires:  refreshExpiresAt,
+	})
 
 	api.respondJSON(w, http.StatusOK, AuthLoginResponse{
 		AccessToken:  accessToken,
@@ -81,7 +94,7 @@ func (api *API) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionID, refreshToken, _, err := api.service.CreateSession(r.Context(), session.User.ID)
+	sessionID, refreshToken, refreshExpiresAt, err := api.service.CreateSession(r.Context(), session.User.ID)
 	if err != nil {
 		api.respondError(w, http.StatusInternalServerError, "failed to create session")
 		return
@@ -94,6 +107,16 @@ func (api *API) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	http.SetCookie(w, &http.Cookie{
+		Name:     "nl_refresh",
+		Value:    refreshToken,
+		Path:     "/", // send on all requests to this host
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteNoneMode,
+		Expires:  refreshExpiresAt,
+	})
+
 	api.respondJSON(w, http.StatusCreated, AuthRegisterResponse{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
@@ -104,16 +127,26 @@ func (api *API) handleRegister(w http.ResponseWriter, r *http.Request) {
 
 func (api *API) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	var req AuthRefreshRequest
-	if err := decodeJSON(r.Body, &req); err != nil {
-		api.respondError(w, http.StatusBadRequest, err.Error())
-		return
-	}
+	// Ignore body errors; we prefer cookie-based refresh going forward
+	_ = decodeJSON(r.Body, &req)
 
 	if !api.ensureService(w) {
 		return
 	}
 
-	sessionID, newRefreshToken, _, userID, err := api.service.RefreshSession(r.Context(), req.RefreshToken)
+	// Prefer refresh token from HttpOnly cookie; fall back to body for backwards compatibility
+	refreshToken := strings.TrimSpace(req.RefreshToken)
+	if refreshToken == "" {
+		if cookie, err := r.Cookie("nl_refresh"); err == nil {
+			refreshToken = cookie.Value
+		}
+	}
+	if refreshToken == "" {
+		api.respondError(w, http.StatusUnauthorized, "refresh token is required")
+		return
+	}
+
+	sessionID, newRefreshToken, newExpiresAt, userID, err := api.service.RefreshSession(r.Context(), refreshToken)
 	if err != nil {
 		api.respondServiceError(w, err)
 		return
@@ -131,6 +164,17 @@ func (api *API) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		api.respondError(w, http.StatusInternalServerError, "failed to issue access token")
 		return
 	}
+
+	// Rotate refresh token cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "nl_refresh",
+		Value:    newRefreshToken,
+		Path:     "/", // send on all requests to this host
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteNoneMode,
+		Expires:  newExpiresAt,
+	})
 
 	api.respondJSON(w, http.StatusOK, AuthRefreshResponse{
 		AccessToken:  accessToken,
@@ -155,6 +199,17 @@ func (api *API) handleLogout(w http.ResponseWriter, r *http.Request) {
 		api.respondServiceError(w, err)
 		return
 	}
+
+	// Clear the refresh token cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "nl_refresh",
+		Value:    "",
+		Path:     "/", // must match the path used when setting
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteNoneMode,
+		MaxAge:   -1,
+	})
 
 	api.respondJSON(w, http.StatusOK, AuthLogoutResponse{Message: "logged out"})
 }
@@ -279,6 +334,25 @@ func (api *API) handleDeleteMeeting(w http.ResponseWriter, r *http.Request) {
 	}
 
 	api.respondJSON(w, http.StatusNoContent, nil)
+}
+
+// Host-only: explicitly start a meeting, transitioning it to active.
+func (api *API) handleStartMeeting(w http.ResponseWriter, r *http.Request) {
+	meetingID := chi.URLParam(r, "meetingID")
+
+	if !api.ensureService(w) {
+		return
+	}
+
+	userID := userIDFromContext(r.Context())
+
+	detail, err := api.service.StartMeeting(r.Context(), meetingID, userID)
+	if err != nil {
+		api.respondServiceError(w, err)
+		return
+	}
+
+	api.respondJSON(w, http.StatusOK, MeetingDetailResponse{Meeting: *detail})
 }
 
 func (api *API) handleJoinMeeting(w http.ResponseWriter, r *http.Request) {

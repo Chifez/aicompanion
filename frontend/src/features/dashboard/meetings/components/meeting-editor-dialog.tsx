@@ -21,6 +21,8 @@ const defaultMeeting: MeetingFormState = {
   startTime: new Date().toISOString(),
   durationMinutes: 30,
   voiceProfile: '',
+  visibility: 'private',
+  inviteEmails: '',
 };
 
 type MeetingEditorDialogProps = {
@@ -127,6 +129,37 @@ export function MeetingEditorDialog({
               className="border-slate-300 bg-white dark:border-slate-800 dark:bg-slate-900/40"
             />
           </Field>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Visibility">
+              <select
+                value={form.visibility ?? 'private'}
+                onChange={(event) =>
+                  setForm((previous) => ({
+                    ...previous,
+                    visibility: event.target
+                      .value as MeetingFormState['visibility'],
+                  }))
+                }
+                className="h-9 rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-900 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-100"
+              >
+                <option value="private">Private (invite-only)</option>
+                <option value="public">Public (anyone with link)</option>
+              </select>
+            </Field>
+            <Field label="Invite participants (emails)">
+              <Textarea
+                value={form.inviteEmails ?? ''}
+                onChange={(event) =>
+                  setForm((previous) => ({
+                    ...previous,
+                    inviteEmails: event.target.value,
+                  }))
+                }
+                placeholder="alice@example.com, bob@example.com"
+                className="h-20 resize-none border-slate-300 bg-white text-xs dark:border-slate-800 dark:bg-slate-900/40"
+              />
+            </Field>
+          </div>
         </div>
 
         <DialogFooter className="flex items-center justify-between gap-4">

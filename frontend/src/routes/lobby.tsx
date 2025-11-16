@@ -20,18 +20,15 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Toggle } from '@/components/ui/toggle';
-import {
-  AlertTriangle,
-  Camera,
-  CheckCircle2,
-  Loader2,
-  RefreshCcw,
-} from 'lucide-react';
+import { Camera, CheckCircle2, Loader2, RefreshCcw } from 'lucide-react';
 import { useMeetingJoin } from '@/features/dashboard/meetings/hooks/use-meeting-join';
+import { toast } from 'sonner';
 import { useMeetingDetail } from '@/features/dashboard/meetings/hooks/use-meeting-detail';
 import { useMediaStreams } from '@/hooks/use-media-streams';
 import { useVideoPreview } from '@/hooks/use-video-preview';
 import { useConnectionStatus } from '@/hooks/use-connection-status';
+import { useAuthStore } from '@/stores/auth-store';
+import { apiClient } from '@/lib/api-client';
 
 export const Route = createFileRoute('/lobby')({
   component: LobbyPage,
@@ -47,8 +44,11 @@ function LobbyPage() {
   const { meetingId } = useSearch({ from: '/lobby' });
   const meetingDetailQuery = useMeetingDetail(meetingId);
   const joinMeeting = useMeetingJoin();
+  const userId = useAuthStore((state) => state.session?.user.id ?? null);
 
   const [spatialAudio, setSpatialAudio] = React.useState(false);
+  const [joinWithMicrophone, setJoinWithMicrophone] = React.useState(true);
+  const [joinWithCamera, setJoinWithCamera] = React.useState(true);
 
   const {
     permissions,
@@ -77,15 +77,28 @@ function LobbyPage() {
       return;
     }
 
-    if (!permissions.microphone || !permissions.camera) {
-      return;
-    }
-
     try {
+      const meeting = meetingDetailQuery.data;
+      const isHost = meeting && userId && meeting.summary.hostUserId === userId;
+      const status = meeting?.summary.status;
+
+      // If host is joining a scheduled meeting, start it first
+      if (isHost && status === 'scheduled') {
+        await apiClient.post(`/meetings/${meetingId}/start`);
+      }
+
       const joinData = await joinMeeting.mutateAsync(meetingId);
       // Store tokens and streams for meeting room
       if (joinData) {
         localStorage.setItem('meetingTokens', JSON.stringify(joinData));
+        // Persist join preferences for the meeting room
+        localStorage.setItem(
+          'meetingJoinPrefs',
+          JSON.stringify({
+            audioEnabled: joinWithMicrophone,
+            videoEnabled: joinWithCamera,
+          })
+        );
         // Store stream references (they'll be passed to meeting room)
         if (cameraStream) {
           // Stream will continue in meeting room
@@ -98,12 +111,26 @@ function LobbyPage() {
           params: { meetingId },
         });
       }
-    } catch (error) {
-      console.error('Failed to join meeting:', error);
+    } catch (error: any) {
+      // Surface friendly errors based on backend messages
+      const message: string =
+        error?.response?.data?.message ??
+        error?.message ??
+        'Failed to join meeting';
+
+      if (message.toLowerCase().includes('not started')) {
+        toast.error(
+          'This meeting has not started yet. Please wait for the host.'
+        );
+      } else if (message.toLowerCase().includes('ended')) {
+        toast.error('This meeting has already ended.');
+      } else if (message.toLowerCase().includes('not invited')) {
+        toast.error('You are not invited to this meeting.');
+      } else {
+        toast.error(message);
+      }
     }
   };
-
-  const permissionsGranted = permissions.microphone && permissions.camera;
 
   return (
     <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-5xl flex-col gap-10 px-6 py-12 text-slate-900 dark:text-slate-100">
@@ -132,7 +159,7 @@ function LobbyPage() {
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="relative aspect-video w-full overflow-hidden rounded-2xl border border-slate-200/70 bg-slate-100 dark:border-slate-900/60 dark:bg-slate-900/50">
-              {permissions.camera && cameraStream ? (
+              {cameraStream ? (
                 <video
                   ref={videoRef}
                   autoPlay
@@ -145,7 +172,7 @@ function LobbyPage() {
                   <Camera className="h-8 w-8" />
                   <p className="text-sm">
                     {permissions.camera
-                      ? 'Camera permission granted'
+                      ? 'Camera permission granted. Initialising preview…'
                       : 'Camera permission needed'}
                   </p>
                 </div>
@@ -255,19 +282,44 @@ function LobbyPage() {
       </div>
 
       <section className="flex flex-col items-center gap-4 rounded-2xl border border-slate-200/70 bg-slate-100 px-6 py-5 text-center dark:border-slate-900/60 dark:bg-slate-900/40">
-        {permissionsGranted ? (
-          <span className="inline-flex items-center gap-2 text-sm text-emerald-500 dark:text-emerald-300">
-            <CheckCircle2 className="h-4 w-4" />
-            All permissions granted. You’re ready to join.
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-2 text-sm text-amber-300">
-            <AlertTriangle className="h-4 w-4" />
-            Allow both microphone and camera to proceed.
-          </span>
-        )}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between w-full max-w-xl">
+          <div className="flex flex-wrap items-center gap-3 justify-center sm:justify-start">
+            <div className="flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 dark:bg-slate-900/60 dark:text-slate-200">
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  joinWithMicrophone ? 'bg-emerald-500' : 'bg-slate-400'
+                }`}
+              />
+              Mic {joinWithMicrophone ? 'On' : 'Off'}
+            </div>
+            <div className="flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 dark:bg-slate-900/60 dark:text-slate-200">
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  joinWithCamera ? 'bg-emerald-500' : 'bg-slate-400'
+                }`}
+              />
+              Camera {joinWithCamera ? 'On' : 'Off'}
+            </div>
+          </div>
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button
+              variant={joinWithMicrophone ? 'outline' : 'ghost'}
+              size="sm"
+              onClick={() => setJoinWithMicrophone((prev) => !prev)}
+            >
+              {joinWithMicrophone ? 'Mute mic on join' : 'Join muted'}
+            </Button>
+            <Button
+              variant={joinWithCamera ? 'outline' : 'ghost'}
+              size="sm"
+              onClick={() => setJoinWithCamera((prev) => !prev)}
+            >
+              {joinWithCamera ? 'Turn camera off' : 'Join with camera off'}
+            </Button>
+          </div>
+        </div>
 
-        <div className="flex flex-wrap justify-center gap-3">
+        <div className="mt-3 flex flex-wrap justify-center gap-3">
           <Button
             variant="ghost"
             onClick={testDevices}
@@ -276,9 +328,7 @@ function LobbyPage() {
             Test devices
           </Button>
           <Button
-            disabled={
-              !permissionsGranted || !meetingId || joinMeeting.isPending
-            }
+            disabled={!meetingId || joinMeeting.isPending}
             className="flex items-center gap-2 bg-sky-500 px-6 text-sm font-semibold text-slate-950 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:bg-slate-800/60 disabled:text-slate-500"
             onClick={handleJoinMeeting}
           >
@@ -290,11 +340,7 @@ function LobbyPage() {
             ) : (
               <>
                 Join meeting
-                {permissionsGranted ? (
-                  <CheckCircle2 className="h-4 w-4" />
-                ) : (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                )}
+                <CheckCircle2 className="h-4 w-4" />
               </>
             )}
           </Button>

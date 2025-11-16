@@ -62,6 +62,8 @@ export type MeetingsResponse = {
     durationMinutes: number;
     voiceProfile: string;
     status: string;
+    visibility?: string;
+    hostUserId?: string;
   }>;
   quickStartTemplates: Array<{
     id: string;
@@ -86,6 +88,8 @@ export type MeetingDetail = {
     durationMinutes: number;
     voiceProfile: string;
     status: string;
+    visibility?: string;
+    hostUserId?: string;
   };
   agenda: Array<{
     id: string;

@@ -22,8 +22,28 @@ export function MeetingRoomPage({ meetingId }: MeetingRoomPageProps) {
   const meetingDetailQuery = useMeetingDetail(meetingId);
 
   const [participants, setParticipants] = React.useState<Participant[]>([]);
-  const [audioEnabled, setAudioEnabled] = React.useState(true);
-  const [videoEnabled, setVideoEnabled] = React.useState(true);
+  const [audioEnabled, setAudioEnabled] = React.useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    try {
+      const raw = window.localStorage.getItem('meetingJoinPrefs');
+      if (!raw) return true;
+      const parsed = JSON.parse(raw) as { audioEnabled?: boolean };
+      return parsed.audioEnabled ?? true;
+    } catch {
+      return true;
+    }
+  });
+  const [videoEnabled, setVideoEnabled] = React.useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    try {
+      const raw = window.localStorage.getItem('meetingJoinPrefs');
+      if (!raw) return true;
+      const parsed = JSON.parse(raw) as { videoEnabled?: boolean };
+      return parsed.videoEnabled ?? true;
+    } catch {
+      return true;
+    }
+  });
 
   // Initialize self participant from user session
   React.useEffect(() => {

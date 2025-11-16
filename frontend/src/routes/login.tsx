@@ -23,8 +23,20 @@ export const Route = createFileRoute('/login')({
   validateSearch: (search: Record<string, unknown>) => ({
     redirect: typeof search.redirect === 'string' ? search.redirect : undefined,
   }),
-  beforeLoad: ({ search }) => {
-    const auth = useAuthStore.getState();
+  // Ensure that if a user already has a valid session (store hydrated with tokens),
+  // they are redirected away from the login page to their intended destination
+  // or the dashboard.
+  beforeLoad: async ({ search }) => {
+    let attempts = 0;
+    let auth = useAuthStore.getState();
+
+    // Wait briefly for Zustand persist hydration to complete
+    while (!auth.isHydrated && attempts < 10) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      auth = useAuthStore.getState();
+      attempts++;
+    }
+
     if (auth.isAuthenticated()) {
       const redirectPath =
         typeof search.redirect === 'string' ? search.redirect : '/dashboard';

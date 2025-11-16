@@ -43,19 +43,14 @@ export function useMediaStreams(): UseMediaStreamsReturn {
 
   const checkPermissions = React.useCallback(async () => {
     try {
-      // Check microphone permission
-      const micStream = await navigator.mediaDevices.getUserMedia({
+      // Request both audio and video in a single call for better compatibility
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
-      });
-      setPermissions((prev) => ({ ...prev, microphone: true }));
-      setAudioStream(micStream);
-
-      // Check camera permission
-      const camStream = await navigator.mediaDevices.getUserMedia({
         video: { width: 1280, height: 720 },
       });
-      setPermissions((prev) => ({ ...prev, camera: true }));
-      setCameraStream(camStream);
+      setPermissions({ microphone: true, camera: true });
+      setAudioStream(stream);
+      setCameraStream(stream);
     } catch (error) {
       console.error('Permission check failed:', error);
     }

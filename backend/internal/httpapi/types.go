@@ -48,6 +48,9 @@ type (
 	AuthRefreshRequest       = core.AuthRefreshRequest
 	AuthRefreshResponse      = core.AuthRefreshResponse
 	AuthLogoutResponse       = core.AuthLogoutResponse
+	MeetingInvite            = core.MeetingInvite
+	CreateMeetingInvitesRequest = core.CreateMeetingInvitesRequest
+	MeetingInvitesResponse   = core.MeetingInvitesResponse
 )
 
 type APIError struct {

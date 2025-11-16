@@ -599,7 +599,8 @@ func (s *AppService) ListMeetings(ctx context.Context) (*core.MeetingsResponse, 
 			   start_time,
 			   duration_minutes,
 			   COALESCE(voice_profile, ''),
-			   status
+			   status,
+			   COALESCE(visibility, 'private')
 		  FROM meetings
 		 ORDER BY start_time DESC`)
 	if err != nil {
@@ -631,6 +632,7 @@ func (s *AppService) ListMeetings(ctx context.Context) (*core.MeetingsResponse, 
 			&item.DurationMinutes,
 			&item.VoiceProfile,
 			&item.Status,
+			&item.Visibility,
 		); err == nil {
 			resp.Scheduled = append(resp.Scheduled, item)
 		}
@@ -656,7 +658,9 @@ func (s *AppService) GetMeeting(ctx context.Context, slug string) (*core.Meeting
 			   duration_minutes,
 			   COALESCE(voice_profile, ''),
 			   status,
-			   COALESCE(ai_persona_id, 'aurora')
+			   COALESCE(visibility, ''),
+			   COALESCE(ai_persona_id, 'aurora'),
+			   COALESCE(host_user_id::text, '')
 		  FROM meetings
 		 WHERE COALESCE(external_id, id::text) = $1
 		 LIMIT 1`, slug).Scan(
@@ -668,7 +672,9 @@ func (s *AppService) GetMeeting(ctx context.Context, slug string) (*core.Meeting
 		&detail.Summary.DurationMinutes,
 		&detail.Summary.VoiceProfile,
 		&detail.Summary.Status,
+		&detail.Summary.Visibility,
 		&detail.AiPersona.ID,
+		&detail.Summary.HostUserID,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -1019,10 +1025,13 @@ func (s *AppService) CreateMeeting(ctx context.Context, req core.MeetingCreateRe
 		status = "instant"
 	}
 
+	// Default visibility to private for now; can be extended to accept from request
+	visibility := "private"
+
 	var meetingID, slug string
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO meetings (external_id, title, description, host_user_id, ai_persona_id, start_time, duration_minutes, voice_profile, status)
-		VALUES ($1, $2, $3, $4::uuid, $5, $6, $7, $8, $9)
+		INSERT INTO meetings (external_id, title, description, host_user_id, ai_persona_id, start_time, duration_minutes, voice_profile, status, visibility)
+		VALUES ($1, $2, $3, $4::uuid, $5, $6, $7, $8, $9, $10)
 		RETURNING id::text, COALESCE(external_id, id::text)`,
 		externalID,
 		strings.TrimSpace(req.Title),
@@ -1033,6 +1042,7 @@ func (s *AppService) CreateMeeting(ctx context.Context, req core.MeetingCreateRe
 		req.DurationMinutes,
 		strings.TrimSpace(req.VoiceProfile),
 		status,
+		visibility,
 	).Scan(&meetingID, &slug); err != nil {
 		return nil, err
 	}
@@ -1207,6 +1217,90 @@ func (s *AppService) DeleteMeeting(ctx context.Context, identifier string) error
 	return nil
 }
 
+// StartMeeting transitions a meeting into an active state. Only the host can start.
+func (s *AppService) StartMeeting(ctx context.Context, identifier string, userID string) (*core.MeetingDetail, error) {
+	if err := s.ensureDB(); err != nil {
+		return nil, err
+	}
+	identifier = strings.TrimSpace(identifier)
+	if identifier == "" {
+		return nil, fmt.Errorf("meeting identifier is required")
+	}
+
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		var err error
+		userID, err = s.firstUserID(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	var (
+		meetingID   string
+		slug        string
+		hostUserID  string
+		status      string
+		actualStart time.Time
+		startTime   time.Time
+	)
+
+	if err := tx.QueryRow(ctx, `
+		SELECT id::text,
+		       COALESCE(external_id, id::text),
+		       COALESCE(host_user_id::text, ''),
+		       status,
+		       COALESCE(actual_started_at, '0001-01-01'::timestamptz),
+		       start_time
+		  FROM meetings
+		 WHERE COALESCE(external_id, id::text) = $1
+		 LIMIT 1`,
+		identifier,
+	).Scan(&meetingID, &slug, &hostUserID, &status, &actualStart, &startTime); err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, fmt.Errorf("meeting not found")
+		}
+		return nil, err
+	}
+
+	if strings.TrimSpace(hostUserID) != "" && userID != hostUserID {
+		return nil, fmt.Errorf("unauthorized to start meeting")
+	}
+
+	if status == "ended" {
+		return nil, fmt.Errorf("meeting already ended")
+	}
+
+	// If already active, just return details
+	if status == "active" {
+		return s.GetMeeting(ctx, slug)
+	}
+
+	// Transition to active and set actual_started_at if not set
+	if _, err := tx.Exec(ctx, `
+		UPDATE meetings
+		   SET status = 'active',
+		       actual_started_at = COALESCE(actual_started_at, NOW()),
+		       updated_at = NOW()
+		 WHERE id::uuid = $1`,
+		meetingID,
+	); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	return s.GetMeeting(ctx, slug)
+}
+
 func (s *AppService) JoinMeeting(ctx context.Context, identifier string, userID string) (*core.MeetingJoinResponse, error) {
 	if err := s.ensureDB(); err != nil {
 		return nil, err
@@ -1217,13 +1311,28 @@ func (s *AppService) JoinMeeting(ctx context.Context, identifier string, userID 
 
 	userID = strings.TrimSpace(userID)
 
-	var meetingID, slug, personaID string
+	var (
+		meetingID  string
+		slug       string
+		personaID  string
+		hostUserID string
+		status     string
+		startTime  time.Time
+		visibility string
+	)
+
 	if err := s.db.QueryRow(ctx, `
-		SELECT id::text, COALESCE(external_id, id::text), COALESCE(ai_persona_id, 'aurora')
+		SELECT id::text,
+		       COALESCE(external_id, id::text),
+		       COALESCE(ai_persona_id, 'aurora'),
+		       COALESCE(host_user_id::text, ''),
+		       status,
+		       start_time,
+		       COALESCE(visibility, 'private')
 		  FROM meetings
 		 WHERE COALESCE(external_id, id::text) = $1
 		 LIMIT 1`, identifier,
-	).Scan(&meetingID, &slug, &personaID); err != nil {
+	).Scan(&meetingID, &slug, &personaID, &hostUserID, &status, &startTime, &visibility); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, fmt.Errorf("meeting not found")
 		}
@@ -1235,6 +1344,59 @@ func (s *AppService) JoinMeeting(ctx context.Context, identifier string, userID 
 		userID, err = s.firstUserID(ctx)
 		if err != nil {
 			return nil, err
+		}
+	}
+
+	isHost := strings.TrimSpace(hostUserID) != "" && userID == hostUserID
+
+	// Basic invite enforcement for private meetings (only host or explicitly invited users)
+	isInvited := false
+	if !isHost && visibility == "private" {
+		// Look up user's email to match both by user_id and email
+		var userEmail string
+		_ = s.db.QueryRow(ctx, `
+			SELECT LOWER(email)
+			  FROM app_users
+			 WHERE id::text = $1
+			 LIMIT 1`,
+			userID,
+		).Scan(&userEmail)
+
+		_ = s.db.QueryRow(ctx, `
+			SELECT EXISTS(
+				SELECT 1
+				  FROM meeting_invites
+				 WHERE meeting_id::text = $1
+				   AND status IN ('pending', 'accepted')
+				   AND (
+					 invitee_user_id::text = $2
+					 OR (email <> '' AND LOWER(email) = $3)
+				   )
+			)`,
+			meetingID, userID, userEmail,
+		).Scan(&isInvited)
+
+		if !isInvited {
+			return nil, fmt.Errorf("not invited to this meeting")
+		}
+	}
+
+	now := time.Now()
+
+	if !isHost {
+		// Non-host participants cannot join ended meetings
+		if status == "ended" {
+			return nil, fmt.Errorf("meeting has ended")
+		}
+
+		// Non-hosts can only join when the meeting is active or instant. For scheduled
+		// meetings, the host must explicitly start the meeting.
+		if status == "scheduled" {
+			return nil, fmt.Errorf("meeting has not started yet")
+		}
+
+		if status != "active" && status != "instant" && now.Before(startTime) {
+			return nil, fmt.Errorf("meeting has not started yet")
 		}
 	}
 

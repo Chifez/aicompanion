@@ -22,7 +22,7 @@ export type RegisterPayload = AuthCredentials & {
 
 type AuthState = {
   accessToken: string | null;
-  refreshToken: string | null;
+  // refreshToken is no longer used on the client; it lives in an HttpOnly cookie
   expiresAt: number | null;
   session: AuthSessionResponse | null;
   isHydrated: boolean;
@@ -64,7 +64,6 @@ const useAuthStoreBase = create<AuthState>()(
   persist(
     (set, get) => ({
       accessToken: null,
-      refreshToken: null,
       expiresAt: null,
       session: null,
       isHydrated: false,
@@ -72,7 +71,6 @@ const useAuthStoreBase = create<AuthState>()(
         const expiresAt = Date.now() + payload.expiresIn * 1000;
         set({
           accessToken: payload.accessToken,
-          refreshToken: payload.refreshToken,
           expiresAt,
           session: payload.session,
           isHydrated: true,
@@ -81,7 +79,6 @@ const useAuthStoreBase = create<AuthState>()(
       clearAuth: () => {
         set({
           accessToken: null,
-          refreshToken: null,
           expiresAt: null,
           session: null,
         });
@@ -122,18 +119,31 @@ const useAuthStoreBase = create<AuthState>()(
         }
       },
       refreshTokens: async () => {
-        const state = get();
-        if (!state.refreshToken) {
-          throw new Error('Missing refresh token');
+        // This must only run in the browser, where cookies are available.
+        if (typeof window === 'undefined') {
+          console.log('[auth] refreshTokens() called on server, skipping');
+          throw new Error('refreshTokens is a client-only method');
         }
-        const { data } = await authClient.post<AuthRefreshResponse>(
-          '/auth/refresh',
-          {
-            refreshToken: state.refreshToken,
-          }
-        );
-        get().setAuth(data);
-        return data.accessToken;
+
+        console.log('[auth] refreshTokens() called');
+        try {
+          const { data } = await authClient.post<AuthRefreshResponse>(
+            '/auth/refresh',
+            {} // refresh token is now supplied via HttpOnly cookie
+          );
+          console.log('[auth] refreshTokens() success', {
+            hasAccessToken: !!data.accessToken,
+            userId: data.session.user.id,
+          });
+          get().setAuth(data);
+          return data.accessToken;
+        } catch (error: any) {
+          console.error(
+            '[auth] refreshTokens() error',
+            error?.response ?? error
+          );
+          throw error;
+        }
       },
       logout: async () => {
         try {
@@ -143,22 +153,23 @@ const useAuthStoreBase = create<AuthState>()(
         }
         set({
           accessToken: null,
-          refreshToken: null,
           expiresAt: null,
           session: null,
         });
       },
       isAuthenticated: () => {
         const state = get();
-        return Boolean(state.accessToken);
+        // User is considered authenticated if we have a valid session object.
+        // Access token is kept in memory only and refreshed via HttpOnly cookie.
+        return Boolean(state.session);
       },
     }),
     {
       name: STORAGE_KEY,
       partialize: (state) => ({
-        accessToken: state.accessToken,
-        refreshToken: state.refreshToken,
-        expiresAt: state.expiresAt,
+        // Only persist session metadata; tokens stay in memory only.
+        accessToken: null,
+        expiresAt: null,
         session: state.session,
       }),
       onRehydrateStorage: () => {
@@ -183,7 +194,10 @@ let refreshPromise: Promise<string> | null = null;
 apiClient.interceptors.request.use((config) => {
   const token = useAuthStore.getState().accessToken;
   if (token) {
+    console.log('[auth] request', config.url, 'attaching Authorization header');
     config.headers.set('Authorization', `Bearer ${token}`);
+  } else {
+    console.log('[auth] request', config.url, '- no accessToken in store');
   }
   return config;
 });
@@ -199,24 +213,32 @@ apiClient.interceptors.response.use(
     const originalRequest = config as typeof config & { _retry?: boolean };
 
     if (response.status === 401 && !originalRequest._retry) {
-      const store = useAuthStore.getState();
-      if (!store.refreshToken) {
-        store.clearAuth();
-        return Promise.reject(error);
-      }
-
+      console.warn(
+        '[auth] 401 from',
+        config.url,
+        '- attempting refresh via refreshTokens()'
+      );
       if (!refreshPromise) {
-        refreshPromise = store.refreshTokens().catch((refreshError) => {
-          refreshPromise = null;
-          throw refreshError;
-        });
+        const store = useAuthStore.getState();
+        refreshPromise = store
+          .refreshTokens()
+          .catch((refreshError: unknown) => {
+            console.error('[auth] refreshTokens() threw', refreshError);
+            refreshPromise = null;
+            throw refreshError;
+          });
       }
 
       try {
         const newAccessToken = await refreshPromise;
         refreshPromise = null;
+        console.log(
+          '[auth] refreshTokens() returned new access token?',
+          !!newAccessToken
+        );
         if (!newAccessToken) {
-          throw new Error('Unable to refresh session');
+          // let caller handle unauthenticated state; do not clear auth here
+          return Promise.reject(error);
         }
         originalRequest._retry = true;
         originalRequest.headers.set(
@@ -225,13 +247,9 @@ apiClient.interceptors.response.use(
         );
         return apiClient(originalRequest);
       } catch (refreshError) {
-        useAuthStore.getState().clearAuth();
+        console.error('[auth] refresh failed, propagating error', refreshError);
         return Promise.reject(refreshError);
       }
-    }
-
-    if (response.status === 401) {
-      useAuthStore.getState().clearAuth();
     }
 
     return Promise.reject(error);
