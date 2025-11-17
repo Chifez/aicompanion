@@ -56,24 +56,13 @@ func (api *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set HttpOnly refresh token cookie (browser-side storage)
-	http.SetCookie(w, &http.Cookie{
-		Name:     "nl_refresh",
-		Value:    refreshToken,
-		Path:     "/", // send on all requests to this host
-		HttpOnly: true,
-		// For cross-site XHR/fetch from http://localhost:3000 to http://localhost:8080
-		// we need SameSite=None and Secure=true so the cookie is included.
-		Secure:   true,
-		SameSite: http.SameSiteNoneMode,
-		Expires:  refreshExpiresAt,
-	})
+	// Set BOTH cookies (access and refresh)
+	api.setAccessTokenCookie(w, accessToken)
+	api.setRefreshTokenCookie(w, refreshToken, refreshExpiresAt)
 
+	// Return ONLY session (no tokens in body)
 	api.respondJSON(w, http.StatusOK, AuthLoginResponse{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		ExpiresIn:    int64(accessTokenTTL.Seconds()),
-		Session:      *session,
+		Session: *session,
 	})
 }
 
@@ -107,52 +96,35 @@ func (api *API) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     "nl_refresh",
-		Value:    refreshToken,
-		Path:     "/", // send on all requests to this host
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteNoneMode,
-		Expires:  refreshExpiresAt,
-	})
+	// Set BOTH cookies (access and refresh)
+	api.setAccessTokenCookie(w, accessToken)
+	api.setRefreshTokenCookie(w, refreshToken, refreshExpiresAt)
 
+	// Return ONLY session (no tokens in body)
 	api.respondJSON(w, http.StatusCreated, AuthRegisterResponse{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		ExpiresIn:    int64(accessTokenTTL.Seconds()),
-		Session:      *session,
+		Session: *session,
 	})
 }
 
 func (api *API) handleRefresh(w http.ResponseWriter, r *http.Request) {
-	var req AuthRefreshRequest
-	// Ignore body errors; we prefer cookie-based refresh going forward
-	_ = decodeJSON(r.Body, &req)
-
 	if !api.ensureService(w) {
 		return
 	}
 
-	// Prefer refresh token from HttpOnly cookie; fall back to body for backwards compatibility
-	refreshToken := strings.TrimSpace(req.RefreshToken)
-	if refreshToken == "" {
-		if cookie, err := r.Cookie("nl_refresh"); err == nil {
-			refreshToken = cookie.Value
-		}
+	// Read refresh token from cookie (not body)
+	cookie, err := r.Cookie("nl_refresh")
+	if err != nil {
+		api.respondError(w, http.StatusUnauthorized, "refresh token required")
+		return
 	}
+
+	refreshToken := strings.TrimSpace(cookie.Value)
 	if refreshToken == "" {
-		api.respondError(w, http.StatusUnauthorized, "refresh token is required")
+		api.respondError(w, http.StatusUnauthorized, "refresh token required")
 		return
 	}
 
 	sessionID, newRefreshToken, newExpiresAt, userID, err := api.service.RefreshSession(r.Context(), refreshToken)
-	if err != nil {
-		api.respondServiceError(w, err)
-		return
-	}
-
-	session, err := api.service.GetAuthSession(r.Context(), userID)
 	if err != nil {
 		api.respondServiceError(w, err)
 		return
@@ -165,22 +137,20 @@ func (api *API) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Rotate refresh token cookie
-	http.SetCookie(w, &http.Cookie{
-		Name:     "nl_refresh",
-		Value:    newRefreshToken,
-		Path:     "/", // send on all requests to this host
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteNoneMode,
-		Expires:  newExpiresAt,
-	})
+	// Rotate BOTH cookies
+	api.setAccessTokenCookie(w, accessToken)
+	api.setRefreshTokenCookie(w, newRefreshToken, newExpiresAt)
 
+	// Load session
+	session, err := api.service.GetAuthSession(r.Context(), userID)
+	if err != nil {
+		api.respondServiceError(w, err)
+		return
+	}
+
+	// Return ONLY session (no tokens in body)
 	api.respondJSON(w, http.StatusOK, AuthRefreshResponse{
-		AccessToken:  accessToken,
-		RefreshToken: newRefreshToken,
-		ExpiresIn:    int64(accessTokenTTL.Seconds()),
-		Session:      *session,
+		Session: *session,
 	})
 }
 
@@ -200,16 +170,8 @@ func (api *API) handleLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Clear the refresh token cookie
-	http.SetCookie(w, &http.Cookie{
-		Name:     "nl_refresh",
-		Value:    "",
-		Path:     "/", // must match the path used when setting
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteNoneMode,
-		MaxAge:   -1,
-	})
+	// Clear BOTH cookies
+	api.clearAuthCookies(w)
 
 	api.respondJSON(w, http.StatusOK, AuthLogoutResponse{Message: "logged out"})
 }

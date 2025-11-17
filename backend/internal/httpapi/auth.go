@@ -17,27 +17,75 @@ const (
 	sessionIDContextKey contextKey = "sessionID"
 )
 
-const accessTokenTTL = 15 * time.Minute
+const accessTokenTTL = 15 * time.Minute // Increased to 30 minutes for better UX
+
+// Cookie helper functions
+func (api *API) setAccessTokenCookie(w http.ResponseWriter, token string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "nl_access",
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true, // HTTPS in production
+		SameSite: http.SameSiteNoneMode, // Cross-site for localhost:3000 -> localhost:8080
+		MaxAge:   int(accessTokenTTL.Seconds()),
+	})
+}
+
+func (api *API) setRefreshTokenCookie(w http.ResponseWriter, token string, expiresAt time.Time) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "nl_refresh",
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteNoneMode,
+		Expires:  expiresAt,
+	})
+}
+
+func (api *API) clearAuthCookies(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "nl_access",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteNoneMode,
+		MaxAge:   -1,
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     "nl_refresh",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteNoneMode,
+		MaxAge:   -1,
+	})
+}
 
 func (api *API) authMiddleware(next http.Handler) http.Handler {
 	secret := api.cfg.JWTSecret
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		if authHeader == "" {
-			api.respondError(w, http.StatusUnauthorized, "missing authorization token")
+		// Read access token from cookie (not header)
+		cookie, err := r.Cookie("nl_access")
+		if err != nil {
+			// Return error with code for frontend to distinguish
+			api.respondJSON(w, http.StatusUnauthorized, map[string]any{
+				"message": "authentication required",
+				"code":    "token_missing",
+			})
 			return
 		}
 
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-			api.respondError(w, http.StatusUnauthorized, "invalid authorization header")
-			return
-		}
-
-		tokenString := strings.TrimSpace(parts[1])
+		tokenString := strings.TrimSpace(cookie.Value)
 		if tokenString == "" {
-			api.respondError(w, http.StatusUnauthorized, "missing authorization token")
+			api.respondJSON(w, http.StatusUnauthorized, map[string]any{
+				"message": "authentication required",
+				"code":    "token_missing",
+			})
 			return
 		}
 
@@ -57,19 +105,29 @@ func (api *API) authMiddleware(next http.Handler) http.Handler {
 			return []byte(secret), nil
 		})
 		if err != nil || !token.Valid {
-			api.respondError(w, http.StatusUnauthorized, "invalid token")
+			// Token expired or invalid - return with code for frontend to trigger refresh
+			api.respondJSON(w, http.StatusUnauthorized, map[string]any{
+				"message": "token expired or invalid",
+				"code":    "token_expired",
+			})
 			return
 		}
 
 		userID := strings.TrimSpace(claims.Subject)
 		if userID == "" {
-			api.respondError(w, http.StatusUnauthorized, "invalid token")
+			api.respondJSON(w, http.StatusUnauthorized, map[string]any{
+				"message": "invalid token",
+				"code":    "token_expired",
+			})
 			return
 		}
 
 		sessionID := strings.TrimSpace(claims.ID)
 		if sessionID == "" {
-			api.respondError(w, http.StatusUnauthorized, "invalid token")
+			api.respondJSON(w, http.StatusUnauthorized, map[string]any{
+				"message": "invalid token",
+				"code":    "token_expired",
+			})
 			return
 		}
 
@@ -80,12 +138,18 @@ func (api *API) authMiddleware(next http.Handler) http.Handler {
 
 		validatedUserID, err := api.service.ValidateSession(r.Context(), sessionID)
 		if err != nil {
-			api.respondError(w, http.StatusUnauthorized, "session expired")
+			api.respondJSON(w, http.StatusUnauthorized, map[string]any{
+				"message": "session expired",
+				"code":    "token_expired",
+			})
 			return
 		}
 
 		if validatedUserID != userID {
-			api.respondError(w, http.StatusUnauthorized, "session expired")
+			api.respondJSON(w, http.StatusUnauthorized, map[string]any{
+				"message": "session expired",
+				"code":    "token_expired",
+			})
 			return
 		}
 

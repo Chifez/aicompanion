@@ -221,17 +221,18 @@ export type MeetingCreateRequest = {
   isInstant?: boolean;
 };
 
-export type AuthResponseBase = {
-  accessToken: string;
-  refreshToken: string;
-  expiresIn: number;
+// Tokens are now sent via HttpOnly cookies, not in response body
+export type AuthLoginResponse = {
   session: AuthSessionResponse;
 };
 
-export type AuthLoginResponse = AuthResponseBase;
-export type AuthRegisterResponse = AuthResponseBase;
+export type AuthRegisterResponse = {
+  session: AuthSessionResponse;
+};
 
-export type AuthRefreshResponse = AuthResponseBase;
+export type AuthRefreshResponse = {
+  session: AuthSessionResponse;
+};
 
 export type MeetingJoinResponse = {
   meetingId: string;

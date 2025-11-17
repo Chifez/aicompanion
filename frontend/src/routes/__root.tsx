@@ -10,6 +10,7 @@ import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools';
 import { TanStackDevtools } from '@tanstack/react-devtools';
 import { Toaster } from 'sonner';
 import { NotFoundPage } from '@/features/shared/not-found-page';
+import { useAuthStore } from '@/stores/auth-store';
 
 import appCss from '../styles.css?url';
 
@@ -32,6 +33,26 @@ export function useTheme() {
 }
 
 export const Route = createRootRoute({
+  beforeLoad: async () => {
+    // This must only run in the browser, where cookies are available.
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    // Wait for Zustand to hydrate
+    let store = useAuthStore.getState();
+    let attempts = 0;
+    while (!store.isHydrated && attempts < 10) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      store = useAuthStore.getState();
+      attempts++;
+    }
+
+    // If no session after hydration, try to bootstrap from cookie
+    if (!store.isAuthenticated()) {
+      await store.bootstrap(); // GET /auth/session
+    }
+  },
   head: () => ({
     meta: [
       {

@@ -32,10 +32,8 @@ type AuthLoginRequest struct {
 }
 
 type AuthLoginResponse struct {
-	AccessToken  string              `json:"accessToken"`
-	RefreshToken string              `json:"refreshToken"`
-	ExpiresIn    int64               `json:"expiresIn"`
-	Session      AuthSessionResponse `json:"session"`
+	// Tokens are now sent via HttpOnly cookies, not in response body
+	Session AuthSessionResponse `json:"session"`
 }
 
 type AuthRegisterRequest struct {
@@ -45,10 +43,8 @@ type AuthRegisterRequest struct {
 }
 
 type AuthRegisterResponse struct {
-	AccessToken  string              `json:"accessToken"`
-	RefreshToken string              `json:"refreshToken"`
-	ExpiresIn    int64               `json:"expiresIn"`
-	Session      AuthSessionResponse `json:"session"`
+	// Tokens are now sent via HttpOnly cookies, not in response body
+	Session AuthSessionResponse `json:"session"`
 }
 
 type AuthRefreshRequest struct {
@@ -56,10 +52,8 @@ type AuthRefreshRequest struct {
 }
 
 type AuthRefreshResponse struct {
-	AccessToken  string              `json:"accessToken"`
-	RefreshToken string              `json:"refreshToken"`
-	ExpiresIn    int64               `json:"expiresIn"`
-	Session      AuthSessionResponse `json:"session"`
+	// Tokens are now sent via HttpOnly cookies, not in response body
+	Session AuthSessionResponse `json:"session"`
 }
 
 type AuthLogoutResponse struct {
