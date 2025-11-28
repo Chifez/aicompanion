@@ -7,7 +7,7 @@ const baseUrl =
   ) ?? 'http://localhost:8080';
 
 export const apiClient = axios.create({
-  baseURL: `${baseUrl}/api`,
+  baseURL: `${baseUrl}/api/v1`,
   withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
@@ -15,7 +15,7 @@ export const apiClient = axios.create({
 });
 
 export const authClient = axios.create({
-  baseURL: `${baseUrl}/api`,
+  baseURL: `${baseUrl}/api/v1`,
   withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
