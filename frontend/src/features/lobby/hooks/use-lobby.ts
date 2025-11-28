@@ -59,10 +59,14 @@ export function useLobby({ meetingId }: UseLobbyProps) {
 
       const joinData = await joinMeeting.mutateAsync(meetingId);
       // Store tokens and streams for meeting room
+      // Using sessionStorage instead of localStorage for better security:
+      // - Cleared when tab closes (reduces attack window)
+      // - Still accessible to JavaScript (XSS risk remains)
+      // - Better than localStorage for sensitive tokens
       if (joinData) {
-        localStorage.setItem('meetingTokens', JSON.stringify(joinData));
+        sessionStorage.setItem('meetingTokens', JSON.stringify(joinData));
         // Persist join preferences for the meeting room
-        localStorage.setItem(
+        sessionStorage.setItem(
           'meetingJoinPrefs',
           JSON.stringify({
             audioEnabled: joinWithMicrophone,

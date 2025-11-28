@@ -10,83 +10,144 @@ import { ParticipantVideoTile } from './components/participant-video-tile';
 import { useScreenSize } from './hooks/use-screen-size';
 import { useMeetingDetail } from '@/features/dashboard/meetings/hooks/use-meeting-detail';
 import { useAuthStore } from '@/stores/auth-store';
+import { useLiveKitRoom } from './hooks/use-livekit-room';
 import type { Participant } from './types';
+import type { MeetingJoinResponse } from '@/types/api';
+import { useNavigate } from '@tanstack/react-router';
 
 type MeetingRoomPageProps = {
   meetingId: string;
 };
 
 export function MeetingRoomPage({ meetingId }: MeetingRoomPageProps) {
+  const navigate = useNavigate();
   const screenSize = useScreenSize();
   const user = useAuthStore((state) => state.session?.user);
   const meetingDetailQuery = useMeetingDetail(meetingId);
 
-  const [participants, setParticipants] = React.useState<Participant[]>([]);
-  const [audioEnabled, setAudioEnabled] = React.useState<boolean>(() => {
-    if (typeof window === 'undefined') return true;
+  // Get LiveKit credentials from localStorage (set by lobby)
+  const [livekitCredentials, setLivekitCredentials] = React.useState<{
+    url: string;
+    token: string;
+    audioEnabled: boolean;
+    videoEnabled: boolean;
+  } | null>(null);
+
+  const [tokenError, setTokenError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
     try {
-      const raw = window.localStorage.getItem('meetingJoinPrefs');
-      if (!raw) return true;
-      const parsed = JSON.parse(raw) as { audioEnabled?: boolean };
-      return parsed.audioEnabled ?? true;
-    } catch {
-      return true;
+      // Use sessionStorage for better security (cleared when tab closes)
+      const tokensRaw = sessionStorage.getItem('meetingTokens');
+      const prefsRaw = sessionStorage.getItem('meetingJoinPrefs');
+
+      if (!tokensRaw) {
+        const errorMsg =
+          'No meeting credentials found. Please join from the lobby.';
+        console.error(errorMsg);
+        setTokenError(errorMsg);
+        return;
+      }
+
+      const tokens = JSON.parse(tokensRaw) as MeetingJoinResponse;
+      const prefs = prefsRaw
+        ? (JSON.parse(prefsRaw) as {
+            audioEnabled?: boolean;
+            videoEnabled?: boolean;
+          })
+        : { audioEnabled: true, videoEnabled: true };
+
+      if (tokens.livekitUrl && tokens.livekitToken) {
+        setLivekitCredentials({
+          url: tokens.livekitUrl,
+          token: tokens.livekitToken,
+          audioEnabled: prefs.audioEnabled ?? true,
+          videoEnabled: prefs.videoEnabled ?? true,
+        });
+        setTokenError(null); // Clear any previous errors
+      } else {
+        const errorMsg =
+          'LiveKit credentials missing from join response. Please try joining again.';
+        console.error(errorMsg);
+        setTokenError(errorMsg);
+      }
+    } catch (error) {
+      const errorMsg =
+        'Failed to load meeting credentials. Please try joining again.';
+      console.error(errorMsg, error);
+      setTokenError(errorMsg);
     }
-  });
-  const [videoEnabled, setVideoEnabled] = React.useState<boolean>(() => {
-    if (typeof window === 'undefined') return true;
-    try {
-      const raw = window.localStorage.getItem('meetingJoinPrefs');
-      if (!raw) return true;
-      const parsed = JSON.parse(raw) as { videoEnabled?: boolean };
-      return parsed.videoEnabled ?? true;
-    } catch {
-      return true;
-    }
+  }, []);
+
+  // Use LiveKit room hook
+  const {
+    room,
+    participants: livekitParticipants,
+    isConnected,
+    isConnecting,
+    error: livekitError,
+    connect,
+    disconnect,
+    toggleAudio,
+    toggleVideo,
+  } = useLiveKitRoom({
+    meetingId,
+    livekitUrl: livekitCredentials?.url || '',
+    livekitToken: livekitCredentials?.token || '',
+    audioEnabled: livekitCredentials?.audioEnabled ?? true,
+    videoEnabled: livekitCredentials?.videoEnabled ?? true,
   });
 
-  // Initialize self participant from user session
+  // Connect to LiveKit when credentials are available
   React.useEffect(() => {
-    if (user) {
-      setParticipants([
-        {
-          id: user.id,
-          name: user.name,
-          label: 'You',
-          avatar: user.avatarUrl || `https://avatar.vercel.sh/${user.id}`,
-          audioEnabled,
-          videoEnabled,
-        },
-      ]);
+    if (livekitCredentials && !isConnected && !isConnecting) {
+      connect();
     }
-  }, [user, audioEnabled, videoEnabled]);
+  }, [livekitCredentials, isConnected, isConnecting, connect]);
 
-  // Load meeting details and AI presence
+  // Handle end meeting - disconnect and navigate away
+  const handleEndMeeting = React.useCallback(async () => {
+    // Disconnect from LiveKit
+    await disconnect();
+    // Clear tokens
+    sessionStorage.removeItem('meetingTokens');
+    sessionStorage.removeItem('meetingJoinPrefs');
+    // Navigate back to dashboard
+    navigate({ to: '/dashboard' });
+  }, [disconnect, navigate]);
+
+  // Cleanup on unmount - only disconnect, don't clear tokens
+  // (tokens are cleared when explicitly ending meeting)
   React.useEffect(() => {
-    if (meetingDetailQuery.data) {
-      // Add AI participant if meeting has voice profile
+    return () => {
+      disconnect();
+    };
+  }, [disconnect]);
+
+  // Combine LiveKit participants with AI participant
+  const participants = React.useMemo(() => {
+    const allParticipants = [...livekitParticipants];
+
+    // Add AI participant if meeting has voice profile
+    if (meetingDetailQuery.data?.summary.voiceProfile) {
       const voiceProfile = meetingDetailQuery.data.summary.voiceProfile;
-      if (voiceProfile) {
-        setParticipants((prev) => {
-          // Only add if not already present
-          if (prev.find((p) => p.id === 'ai')) {
-            return prev;
-          }
-          return [
-            ...prev,
-            {
-              id: 'ai',
-              name: voiceProfile.split(' · ')[0] || 'AI Companion',
-              label: 'AI',
-              avatar: 'https://avatar.vercel.sh/ai',
-              audioEnabled: true,
-              videoEnabled: false,
-            },
-          ];
+      const aiName = voiceProfile.split(' · ')[0] || 'AI Companion';
+
+      // Only add if not already present
+      if (!allParticipants.find((p) => p.id === 'ai')) {
+        allParticipants.push({
+          id: 'ai',
+          name: aiName,
+          label: 'AI',
+          avatar: 'https://avatar.vercel.sh/ai',
+          audioEnabled: true,
+          videoEnabled: false,
         });
       }
     }
-  }, [meetingDetailQuery.data]);
+
+    return allParticipants;
+  }, [livekitParticipants, meetingDetailQuery.data]);
 
   const activeParticipants = React.useMemo(
     () => participants.slice(0, 2),
@@ -125,13 +186,13 @@ export function MeetingRoomPage({ meetingId }: MeetingRoomPageProps) {
     };
   }, [meetingDetailQuery.data]);
 
-  const handleToggleAudio = React.useCallback(() => {
-    setAudioEnabled((prev) => !prev);
-  }, []);
+  const handleToggleAudio = React.useCallback(async () => {
+    await toggleAudio();
+  }, [toggleAudio]);
 
-  const handleToggleVideo = React.useCallback(() => {
-    setVideoEnabled((prev) => !prev);
-  }, []);
+  const handleToggleVideo = React.useCallback(async () => {
+    await toggleVideo();
+  }, [toggleVideo]);
 
   return (
     <div className="relative flex h-screen flex-col bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
@@ -169,7 +230,7 @@ export function MeetingRoomPage({ meetingId }: MeetingRoomPageProps) {
             <div className={layout.secondaryContainerClass}>
               {secondaryParticipants.map((participant) => (
                 <div key={participant.id} className={layout.secondaryTileClass}>
-                  <ParticipantVideoTile participant={participant} />
+                  <ParticipantVideoTile participant={participant} room={room} />
                 </div>
               ))}
             </div>
@@ -181,10 +242,42 @@ export function MeetingRoomPage({ meetingId }: MeetingRoomPageProps) {
                 <ParticipantVideoTile
                   participant={floatingParticipant}
                   compact
+                  room={room}
                 />
               </div>
             </div>
           ) : null}
+
+          {/* Connection status and errors */}
+          {isConnecting && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 rounded-lg bg-blue-500/90 px-4 py-2 text-sm text-white">
+              Connecting to meeting...
+            </div>
+          )}
+          {livekitError && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 rounded-lg bg-red-500/90 px-4 py-2 text-sm text-white">
+              Connection error: {livekitError.message}
+            </div>
+          )}
+          {tokenError && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 rounded-lg bg-red-500/90 px-4 py-2 text-sm text-white max-w-md text-center">
+              {tokenError}
+              <button
+                onClick={() => navigate({ to: '/dashboard' })}
+                className="ml-2 underline"
+              >
+                Go to Dashboard
+              </button>
+            </div>
+          )}
+          {!isConnected &&
+            !isConnecting &&
+            livekitCredentials &&
+            !tokenError && (
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 rounded-lg bg-yellow-500/90 px-4 py-2 text-sm text-white">
+                Not connected. Please refresh the page.
+              </div>
+            )}
         </div>
       </main>
 
@@ -196,6 +289,7 @@ export function MeetingRoomPage({ meetingId }: MeetingRoomPageProps) {
         }}
         onToggleAudio={handleToggleAudio}
         onToggleVideo={handleToggleVideo}
+        onEndMeeting={handleEndMeeting}
       />
     </div>
   );

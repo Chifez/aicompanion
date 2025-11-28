@@ -7,7 +7,9 @@ export function useAuthGuard(search?: { redirect?: string }) {
   // Only redirect if hydrated and authenticated
   if (auth.isHydrated && auth.isAuthenticated()) {
     const redirectPath =
-      typeof search?.redirect === 'string' ? search.redirect : '/dashboard';
+      typeof search?.redirect === 'string'
+        ? decodeURIComponent(search.redirect)
+        : '/dashboard';
     throw redirect({ to: redirectPath });
   }
 }

@@ -23,6 +23,7 @@ type ControlBarProps = {
   media: { audio: boolean; video: boolean };
   onToggleAudio: () => void;
   onToggleVideo: () => void;
+  onEndMeeting?: () => void;
 };
 
 const RADIAL_SETTINGS_ITEMS = [
@@ -35,6 +36,7 @@ export function ControlBar({
   media,
   onToggleAudio,
   onToggleVideo,
+  onEndMeeting,
 }: ControlBarProps) {
   const [showVolume, setShowVolume] = React.useState(false);
   const [volume, setVolume] = React.useState(70);
@@ -156,7 +158,10 @@ export function ControlBar({
           </div>
         ) : null}
 
-        <Button className="inline-flex h-11 items-center gap-2 rounded-full bg-red-500 px-5 text-sm font-semibold text-slate-50 hover:bg-red-400">
+        <Button
+          onClick={onEndMeeting}
+          className="inline-flex h-11 items-center gap-2 rounded-full bg-red-500 px-5 text-sm font-semibold text-slate-50 hover:bg-red-400"
+        >
           <PhoneOff className="h-4 w-4" />
           <span className="hidden sm:inline">Leave</span>
         </Button>

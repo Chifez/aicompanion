@@ -1,3 +1,5 @@
+import type { RemoteParticipant } from 'livekit-client';
+
 export type Participant = {
   id: string;
   name: string;
@@ -5,6 +7,7 @@ export type Participant = {
   avatar: string;
   audioEnabled: boolean;
   videoEnabled: boolean;
+  track?: RemoteParticipant; // LiveKit remote participant for video tracks
 };
 
 export const getParticipantStatus = (participant: Participant) =>

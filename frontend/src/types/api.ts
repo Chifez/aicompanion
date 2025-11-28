@@ -235,6 +235,8 @@ export type AuthRefreshResponse = {
 };
 
 export type MeetingJoinResponse = {
+  livekitToken?: string;
+  livekitUrl?: string;
   meetingId: string;
   participantId: string;
   webRtcToken: string;

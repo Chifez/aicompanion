@@ -26,6 +26,9 @@ type Config struct {
 	WebrtcTURNURL        string
 	WebrtcTURNUsername   string
 	WebrtcTURNPassword   string
+	LiveKitURL           string
+	LiveKitAPIKey        string
+	LiveKitAPISecret     string
 }
 
 func Load() (*Config, error) {
@@ -49,6 +52,9 @@ func Load() (*Config, error) {
 		WebrtcTURNURL:        getString("WEBRTC_TURN_URL", ""),
 		WebrtcTURNUsername:   getString("WEBRTC_TURN_USERNAME", ""),
 		WebrtcTURNPassword:   getString("WEBRTC_TURN_PASSWORD", ""),
+		LiveKitURL:           getString("LIVEKIT_URL", ""),
+		LiveKitAPIKey:        getString("LIVEKIT_API_KEY", ""),
+		LiveKitAPISecret:     getString("LIVEKIT_API_SECRET", ""),
 	}
 
 	if cfg.HTTPPort <= 0 {

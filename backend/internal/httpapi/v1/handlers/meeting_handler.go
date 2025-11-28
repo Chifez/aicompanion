@@ -9,6 +9,7 @@ import (
 	"github.com/aicomp/ai-virtual-chat/backend/internal/httpapi/contracts"
 	"github.com/aicomp/ai-virtual-chat/backend/internal/httpapi/response"
 	"github.com/aicomp/ai-virtual-chat/backend/internal/httpapi/utils"
+	"github.com/aicomp/ai-virtual-chat/backend/internal/services"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -242,20 +243,49 @@ func HandleJoinMeeting(api contracts.V1APIInterface) http.HandlerFunc {
 
 		userID := httpapicontext.UserIDFromContext(r.Context())
 
+		// Get user info for LiveKit token
+		authSession, err := api.Service().GetAuthSession(r.Context(), userID)
+		if err != nil {
+			api.RespondServiceError(w, err)
+			return
+		}
+
 		joinResp, err := api.Service().JoinMeeting(r.Context(), meetingID, userID)
 		if err != nil {
 			api.RespondServiceError(w, err)
 			return
 		}
 
+		// Generate LiveKit token if configured
+		cfg := api.Cfg()
+		if cfg.LiveKitURL != "" && cfg.LiveKitAPIKey != "" && cfg.LiveKitAPISecret != "" {
+			livekitToken, err := services.GenerateLiveKitToken(
+				cfg.LiveKitAPIKey,
+				cfg.LiveKitAPISecret,
+				userID,
+				authSession.User.Name,
+				meetingID, // Use meetingID as room name
+				true,      // canPublish
+				true,      // canSubscribe
+			)
+			if err != nil {
+				api.Logger().Printf("failed to generate LiveKit token: %v", err)
+				// Continue without LiveKit token if generation fails
+			} else {
+				joinResp.LiveKitToken = livekitToken
+				joinResp.LiveKitURL = cfg.LiveKitURL
+			}
+		}
+
+		// Legacy tokens (keep for backward compatibility)
 		joinResp.WebRTCToken = utils.GenerateToken(24)
 		joinResp.AIRealtimeToken = utils.GenerateToken(24)
 		joinResp.VoiceSynthToken = utils.GenerateToken(24)
 		joinResp.ExpiresAt = time.Now().Add(10 * time.Minute)
 		joinResp.TurnCredentials = core.TurnCredentials{
-			URL:      api.Cfg().WebrtcTURNURL,
-			Username: api.Cfg().WebrtcTURNUsername,
-			Password: api.Cfg().WebrtcTURNPassword,
+			URL:      cfg.WebrtcTURNURL,
+			Username: cfg.WebrtcTURNUsername,
+			Password: cfg.WebrtcTURNPassword,
 		}
 
 		response.JSON(w, http.StatusOK, joinResp)
