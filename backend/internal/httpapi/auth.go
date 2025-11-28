@@ -1,38 +1,33 @@
 package httpapi
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/aicomp/ai-virtual-chat/backend/internal/httpapi/context"
 	"github.com/golang-jwt/jwt/v5"
-)
-
-type contextKey string
-
-const (
-	userIDContextKey contextKey = "userID"
-	sessionIDContextKey contextKey = "sessionID"
 )
 
 const accessTokenTTL = 15 * time.Minute // Increased to 30 minutes for better UX
 
 // Cookie helper functions
-func (api *API) setAccessTokenCookie(w http.ResponseWriter, token string) {
+// SetAccessTokenCookie sets the access token cookie
+func (api *API) SetAccessTokenCookie(w http.ResponseWriter, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "nl_access",
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   true, // HTTPS in production
+		Secure:   true,                  // HTTPS in production
 		SameSite: http.SameSiteNoneMode, // Cross-site for localhost:3000 -> localhost:8080
 		MaxAge:   int(accessTokenTTL.Seconds()),
 	})
 }
 
-func (api *API) setRefreshTokenCookie(w http.ResponseWriter, token string, expiresAt time.Time) {
+// SetRefreshTokenCookie sets the refresh token cookie
+func (api *API) SetRefreshTokenCookie(w http.ResponseWriter, token string, expiresAt time.Time) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "nl_refresh",
 		Value:    token,
@@ -44,7 +39,8 @@ func (api *API) setRefreshTokenCookie(w http.ResponseWriter, token string, expir
 	})
 }
 
-func (api *API) clearAuthCookies(w http.ResponseWriter) {
+// ClearAuthCookies clears both access and refresh token cookies
+func (api *API) ClearAuthCookies(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "nl_access",
 		Value:    "",
@@ -65,7 +61,8 @@ func (api *API) clearAuthCookies(w http.ResponseWriter) {
 	})
 }
 
-func (api *API) authMiddleware(next http.Handler) http.Handler {
+// AuthMiddleware provides authentication middleware for protected routes
+func (api *API) AuthMiddleware(next http.Handler) http.Handler {
 	secret := api.cfg.JWTSecret
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -73,7 +70,7 @@ func (api *API) authMiddleware(next http.Handler) http.Handler {
 		cookie, err := r.Cookie("nl_access")
 		if err != nil {
 			// Return error with code for frontend to distinguish
-			api.respondJSON(w, http.StatusUnauthorized, map[string]any{
+			api.RespondJSON(w, http.StatusUnauthorized, map[string]any{
 				"message": "authentication required",
 				"code":    "token_missing",
 			})
@@ -82,7 +79,7 @@ func (api *API) authMiddleware(next http.Handler) http.Handler {
 
 		tokenString := strings.TrimSpace(cookie.Value)
 		if tokenString == "" {
-			api.respondJSON(w, http.StatusUnauthorized, map[string]any{
+			api.RespondJSON(w, http.StatusUnauthorized, map[string]any{
 				"message": "authentication required",
 				"code":    "token_missing",
 			})
@@ -106,7 +103,7 @@ func (api *API) authMiddleware(next http.Handler) http.Handler {
 		})
 		if err != nil || !token.Valid {
 			// Token expired or invalid - return with code for frontend to trigger refresh
-			api.respondJSON(w, http.StatusUnauthorized, map[string]any{
+			api.RespondJSON(w, http.StatusUnauthorized, map[string]any{
 				"message": "token expired or invalid",
 				"code":    "token_expired",
 			})
@@ -115,7 +112,7 @@ func (api *API) authMiddleware(next http.Handler) http.Handler {
 
 		userID := strings.TrimSpace(claims.Subject)
 		if userID == "" {
-			api.respondJSON(w, http.StatusUnauthorized, map[string]any{
+			api.RespondJSON(w, http.StatusUnauthorized, map[string]any{
 				"message": "invalid token",
 				"code":    "token_expired",
 			})
@@ -124,7 +121,7 @@ func (api *API) authMiddleware(next http.Handler) http.Handler {
 
 		sessionID := strings.TrimSpace(claims.ID)
 		if sessionID == "" {
-			api.respondJSON(w, http.StatusUnauthorized, map[string]any{
+			api.RespondJSON(w, http.StatusUnauthorized, map[string]any{
 				"message": "invalid token",
 				"code":    "token_expired",
 			})
@@ -132,13 +129,13 @@ func (api *API) authMiddleware(next http.Handler) http.Handler {
 		}
 
 		if api.service == nil {
-			api.respondError(w, http.StatusServiceUnavailable, "service unavailable")
+			api.RespondError(w, http.StatusServiceUnavailable, "service unavailable")
 			return
 		}
 
 		validatedUserID, err := api.service.ValidateSession(r.Context(), sessionID)
 		if err != nil {
-			api.respondJSON(w, http.StatusUnauthorized, map[string]any{
+			api.RespondJSON(w, http.StatusUnauthorized, map[string]any{
 				"message": "session expired",
 				"code":    "token_expired",
 			})
@@ -146,40 +143,20 @@ func (api *API) authMiddleware(next http.Handler) http.Handler {
 		}
 
 		if validatedUserID != userID {
-			api.respondJSON(w, http.StatusUnauthorized, map[string]any{
+			api.RespondJSON(w, http.StatusUnauthorized, map[string]any{
 				"message": "session expired",
 				"code":    "token_expired",
 			})
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), userIDContextKey, userID)
-		ctx = context.WithValue(ctx, sessionIDContextKey, sessionID)
+		ctx := context.WithAuthContext(r.Context(), userID, sessionID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-func userIDFromContext(ctx context.Context) string {
-	if ctx == nil {
-		return ""
-	}
-	if val, ok := ctx.Value(userIDContextKey).(string); ok {
-		return val
-	}
-	return ""
-}
-
-func sessionIDFromContext(ctx context.Context) string {
-	if ctx == nil {
-		return ""
-	}
-	if val, ok := ctx.Value(sessionIDContextKey).(string); ok {
-		return val
-	}
-	return ""
-}
-
-func (api *API) signAccessToken(userID string, sessionID string) (string, time.Time, error) {
+// SignAccessToken creates and signs a JWT access token
+func (api *API) SignAccessToken(userID string, sessionID string) (string, time.Time, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return "", time.Time{}, fmt.Errorf("invalid user id")

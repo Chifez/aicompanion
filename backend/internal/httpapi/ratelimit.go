@@ -1,62 +1,171 @@
 package httpapi
 
 import (
-	"context"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/redis/go-redis/v9"
+	httpapicontext "github.com/aicomp/ai-virtual-chat/backend/internal/httpapi/context"
+	"github.com/aicomp/ai-virtual-chat/backend/internal/httpapi/contracts"
+	"golang.org/x/time/rate"
 )
 
 // RateLimitConfig defines the rate limit configuration for an endpoint
 type RateLimitConfig struct {
 	Limit    int           // Number of requests allowed
 	Window   time.Duration // Time window for the limit
-	Strategy string        // "ip", "user", or "global"
+	Burst    int
+	Strategy string // "ip", "user", or "global"
+}
+
+//limiter entry holds a rate limiter instance
+
+type LimiterEntry struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
 }
 
 // RateLimiter handles rate limiting using Redis
 type RateLimiter struct {
-	redis  *redis.Client
-	logger Logger
+	logger contracts.Logger
 	config map[string]RateLimitConfig
+
+	limiters map[string]*LimiterEntry
+	mu       sync.RWMutex
+
+	cleanupTicker *time.Ticker
+	done          chan struct{}
 }
 
 // NewRateLimiter creates a new rate limiter instance
-func NewRateLimiter(redisClient *redis.Client, logger Logger) *RateLimiter {
-	return &RateLimiter{
-		redis:  redisClient,
-		logger: logger,
+func NewRateLimiter(logger contracts.Logger) *RateLimiter {
+	rl := &RateLimiter{
+		logger:   logger,
+		limiters: make(map[string]*LimiterEntry),
 		config: map[string]RateLimitConfig{
-			// Auth endpoints - strict limits per IP
-			"POST:/api/auth/register": {Limit: 5, Window: 1 * time.Hour, Strategy: "ip"},
-			"POST:/api/auth/login":    {Limit: 10, Window: 15 * time.Minute, Strategy: "ip"},
-			"POST:/api/auth/refresh":  {Limit: 30, Window: 1 * time.Minute, Strategy: "ip"},
-			"POST:/api/auth/logout":   {Limit: 20, Window: 1 * time.Minute, Strategy: "user"},
+			"POST:/api/v1/auth/register": {
+				Limit: 5, Window: 1 * time.Hour, Burst: 2, Strategy: "ip",
+			},
+			"POST:/api/v1/auth/login": {
+				Limit: 10, Window: 15 * time.Minute, Burst: 3, Strategy: "ip",
+			},
+			"POST:/api/v1/auth/refresh": {
+				Limit: 30, Window: 1 * time.Minute, Burst: 10, Strategy: "ip",
+			},
+			"POST:/api/v1/auth/logout": {
+				Limit: 20, Window: 1 * time.Minute, Burst: 5, Strategy: "user",
+			},
 
-			// Protected endpoints - per user
-			"GET:/api/auth/session":       {Limit: 30, Window: 1 * time.Minute, Strategy: "user"},
-			"GET:/api/dashboard/overview":  {Limit: 60, Window: 1 * time.Minute, Strategy: "user"},
-			"GET:/api/meetings":            {Limit: 30, Window: 1 * time.Minute, Strategy: "user"},
-			"GET:/api/meetings/{meetingID}": {Limit: 60, Window: 1 * time.Minute, Strategy: "user"},
-			"POST:/api/meetings":          {Limit: 10, Window: 1 * time.Minute, Strategy: "user"},
-			"PATCH:/api/meetings/{meetingID}": {Limit: 20, Window: 1 * time.Minute, Strategy: "user"},
-			"DELETE:/api/meetings/{meetingID}": {Limit: 10, Window: 1 * time.Minute, Strategy: "user"},
-			"POST:/api/meetings/{meetingID}/start": {Limit: 5, Window: 1 * time.Minute, Strategy: "user"},
-			"POST:/api/meetings/{meetingID}/join": {Limit: 10, Window: 1 * time.Minute, Strategy: "user"},
-			"GET:/api/history":            {Limit: 30, Window: 1 * time.Minute, Strategy: "user"},
-			"GET:/api/history/{transcriptID}": {Limit: 60, Window: 1 * time.Minute, Strategy: "user"},
-			"GET:/api/settings":           {Limit: 30, Window: 1 * time.Minute, Strategy: "user"},
-			"PUT:/api/settings":           {Limit: 20, Window: 1 * time.Minute, Strategy: "user"},
-			"GET:/api/settings/presets":   {Limit: 30, Window: 1 * time.Minute, Strategy: "user"},
-			"POST:/api/settings/presets":  {Limit: 10, Window: 1 * time.Minute, Strategy: "user"},
-			"PUT:/api/settings/presets/{presetID}": {Limit: 20, Window: 1 * time.Minute, Strategy: "user"},
-			"DELETE:/api/settings/presets/{presetID}": {Limit: 10, Window: 1 * time.Minute, Strategy: "user"},
+			"GET:/api/v1/auth/session": {
+				Limit: 30, Window: 1 * time.Minute, Burst: 10, Strategy: "user",
+			},
+			"GET:/api/v1/dashboard/overview": {
+				Limit: 60, Window: 1 * time.Minute, Burst: 20, Strategy: "user",
+			},
+			"GET:/api/v1/meetings": {
+				Limit: 30, Window: 1 * time.Minute, Burst: 10, Strategy: "user",
+			},
+			"GET:/api/v1/meetings/{meetingID}": {
+				Limit: 60, Window: 1 * time.Minute, Burst: 15, Strategy: "user",
+			},
+			"POST:/api/v1/meetings": {
+				Limit: 10, Window: 1 * time.Minute, Burst: 3, Strategy: "user",
+			},
+			"PATCH:/api/v1/meetings/{meetingID}": {
+				Limit: 20, Window: 1 * time.Minute, Burst: 5, Strategy: "user",
+			},
+			"DELETE:/api/v1/meetings/{meetingID}": {
+				Limit: 10, Window: 1 * time.Minute, Burst: 3, Strategy: "user",
+			},
+			"POST:/api/v1/meetings/{meetingID}/start": {
+				Limit: 5, Window: 1 * time.Minute, Burst: 2, Strategy: "user",
+			},
+			"POST:/api/v1/meetings/{meetingID}/join": {
+				Limit: 10, Window: 1 * time.Minute, Burst: 3, Strategy: "user",
+			},
+			"GET:/api/v1/history": {
+				Limit: 30, Window: 1 * time.Minute, Burst: 10, Strategy: "user",
+			},
+			"GET:/api/v1/history/{transcriptID}": {
+				Limit: 60, Window: 1 * time.Minute, Burst: 15, Strategy: "user",
+			},
+			"GET:/api/v1/settings": {
+				Limit: 30, Window: 1 * time.Minute, Burst: 10, Strategy: "user",
+			},
+			"PUT:/api/v1/settings": {
+				Limit: 20, Window: 1 * time.Minute, Burst: 5, Strategy: "user",
+			},
+			"GET:/api/v1/settings/presets": {
+				Limit: 30, Window: 1 * time.Minute, Burst: 10, Strategy: "user",
+			},
+			"POST:/api/v1/settings/presets": {
+				Limit: 10, Window: 1 * time.Minute, Burst: 3, Strategy: "user",
+			},
+			"PUT:/api/v1/settings/presets/{presetID}": {
+				Limit: 20, Window: 1 * time.Minute, Burst: 5, Strategy: "user",
+			},
+			"DELETE:/api/v1/settings/presets/{presetID}": {
+				Limit: 10, Window: 1 * time.Minute, Burst: 3, Strategy: "user",
+			},
 		},
+		done: make(chan struct{}),
 	}
+
+	rl.cleanupTicker = time.NewTicker(5 * time.Minute)
+	go rl.cleanup()
+
+	return rl
+}
+
+// cleanup handles the cleanup of the function
+// i am just trying to test this go doc thingy
+func (rl *RateLimiter) cleanup() {
+	for {
+		select {
+		case <-rl.cleanupTicker.C:
+			rl.mu.Lock()
+			now := time.Now()
+			for key, entry := range rl.limiters {
+				if now.Sub(entry.lastSeen) > time.Hour {
+					delete(rl.limiters, key)
+				}
+			}
+			rl.mu.Unlock()
+		case <-rl.done:
+			return
+		}
+	}
+}
+
+func (rl *RateLimiter) Stop() {
+	rl.cleanupTicker.Stop()
+	close(rl.done)
+}
+
+func (rl *RateLimiter) getLimiter(identifier string, config RateLimitConfig) *rate.Limiter {
+	rl.mu.RLock()
+	entry, exists := rl.limiters[identifier]
+	rl.mu.RUnlock()
+
+	if exists {
+		entry.lastSeen = time.Now()
+		return entry.limiter
+	}
+
+	ratePerSecond := float64(config.Limit) / config.Window.Seconds()
+	limiter := rate.NewLimiter(rate.Limit(ratePerSecond), config.Burst)
+
+	rl.mu.Lock()
+	rl.limiters[identifier] = &LimiterEntry{
+		limiter:  limiter,
+		lastSeen: time.Now(),
+	}
+
+	rl.mu.Unlock()
+
+	return limiter
 }
 
 // Middleware returns a Chi middleware function for rate limiting
@@ -82,7 +191,7 @@ func (rl *RateLimiter) Middleware() func(http.Handler) http.Handler {
 				identifier = rl.getClientIP(r)
 			case "user":
 				// Try to get user ID from context (set by authMiddleware)
-				identifier = userIDFromContext(r.Context())
+				identifier = httpapicontext.UserIDFromContext(r.Context())
 				if identifier == "" {
 					// Fallback to IP if not authenticated
 					identifier = rl.getClientIP(r)
@@ -92,70 +201,52 @@ func (rl *RateLimiter) Middleware() func(http.Handler) http.Handler {
 			}
 
 			// Build Redis key
-			key := fmt.Sprintf("ratelimit:%s:%s:%s", config.Strategy, identifier, endpointKey)
+			limiterkey := endpointKey + ":" + identifier
 
 			// Check rate limit
-			allowed, remaining, resetTime, err := rl.checkLimit(r.Context(), key, config)
+			limiter := rl.getLimiter(limiterkey, config)
 
-			if err != nil {
-				// On error, fail open (allow request) to avoid breaking the app
-				rl.logger.Printf("rate limit error: %v", err)
-				next.ServeHTTP(w, r)
+			if !limiter.Allow() {
+				w.Header().Set("Retry-After", strconv.FormatInt(int64(config.Window.Seconds()), 10))
+				w.Header().Set("X-RateLimit-Limit", strconv.Itoa(config.Limit))
+				w.Header().Set("X-RateLimit-Remaining", "0")
+				w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(config.Window).Unix(), 10))
+
+				w.WriteHeader(http.StatusTooManyRequests)
+				w.Write([]byte(`{"message":"rate limit exceeded"}`))
 				return
+			}
+
+			reserve := limiter.Reserve()
+
+			if !reserve.OK() {
+				w.WriteHeader(http.StatusTooManyRequests)
+				return
+			}
+
+			delay := reserve.Delay()
+			reserve.Cancel()
+
+			remaining := config.Limit
+
+			if delay > 0 {
+
+				remaining = int(float64(config.Limit) * (1 - delay.Seconds()/config.Window.Seconds()))
+
+				if remaining < 0 {
+					remaining = 0
+				}
 			}
 
 			// Set rate limit headers (always set, even if not rate limited)
 			w.Header().Set("X-RateLimit-Limit", strconv.Itoa(config.Limit))
 			w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
-			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetTime.Unix(), 10))
-
-			if !allowed {
-				// Rate limit exceeded
-				w.Header().Set("Retry-After", strconv.FormatInt(int64(config.Window.Seconds()), 10))
-				rl.respondError(w, http.StatusTooManyRequests, "rate limit exceeded")
-				return
-			}
+			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(config.Window).Unix(), 10))
 
 			// Request allowed, proceed
 			next.ServeHTTP(w, r)
 		})
 	}
-}
-
-// checkLimit uses Redis to implement a token bucket rate limiter
-func (rl *RateLimiter) checkLimit(ctx context.Context, key string, config RateLimitConfig) (allowed bool, remaining int, resetTime time.Time, err error) {
-	// Use Redis pipeline for atomic operations
-	pipe := rl.redis.Pipeline()
-	
-	// Increment the counter
-	incr := pipe.Incr(ctx, key)
-	
-	// Set expiration (only if key is new)
-	pipe.Expire(ctx, key, config.Window)
-	
-	// Execute pipeline
-	_, err = pipe.Exec(ctx)
-	if err != nil {
-		return true, config.Limit, time.Now(), err // Fail open
-	}
-
-	count := incr.Val()
-	remaining = int(config.Limit) - int(count)
-	if remaining < 0 {
-		remaining = 0
-	}
-
-	allowed = count <= int64(config.Limit)
-
-	// Calculate reset time
-	ttl, _ := rl.redis.TTL(ctx, key).Result()
-	if ttl > 0 {
-		resetTime = time.Now().Add(ttl)
-	} else {
-		resetTime = time.Now().Add(config.Window)
-	}
-
-	return allowed, remaining, resetTime, nil
 }
 
 // getClientIP extracts the client IP from the request
@@ -186,23 +277,23 @@ func (rl *RateLimiter) getClientIP(r *http.Request) string {
 }
 
 // normalizePath converts Chi route patterns to a consistent format
-// Example: "/api/meetings/abc123" -> "/api/meetings/{meetingID}"
+// Example: "/api/v1/meetings/abc123" -> "/api/v1/meetings/{meetingID}"
 func (rl *RateLimiter) normalizePath(method, path string) string {
 	// For now, we'll use a simple approach: match exact paths or patterns
 	// In a more sophisticated implementation, you'd match against Chi route patterns
-	
+
 	// Check for common patterns
-	if strings.Contains(path, "/meetings/") && len(strings.Split(path, "/")) == 4 {
-		// Matches /api/meetings/{id}
-		return method + ":/api/meetings/{meetingID}"
+	if strings.Contains(path, "/meetings/") && len(strings.Split(path, "/")) == 5 {
+		// Matches /api/v1/meetings/{id}
+		return method + ":/api/v1/meetings/{meetingID}"
 	}
-	if strings.Contains(path, "/history/") && len(strings.Split(path, "/")) == 4 {
-		// Matches /api/history/{id}
-		return method + ":/api/history/{transcriptID}"
+	if strings.Contains(path, "/history/") && len(strings.Split(path, "/")) == 5 {
+		// Matches /api/v1/history/{id}
+		return method + ":/api/v1/history/{transcriptID}"
 	}
-	if strings.Contains(path, "/presets/") && len(strings.Split(path, "/")) == 5 {
-		// Matches /api/settings/presets/{id}
-		return method + ":/api/settings/presets/{presetID}"
+	if strings.Contains(path, "/presets/") && len(strings.Split(path, "/")) == 6 {
+		// Matches /api/v1/settings/presets/{id}
+		return method + ":/api/v1/settings/presets/{presetID}"
 	}
 
 	// Return method + path as-is for exact matches

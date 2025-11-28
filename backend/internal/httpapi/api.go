@@ -6,6 +6,9 @@ import (
 	"time"
 
 	"github.com/aicomp/ai-virtual-chat/backend/internal/config"
+	"github.com/aicomp/ai-virtual-chat/backend/internal/httpapi/contracts"
+	"github.com/aicomp/ai-virtual-chat/backend/internal/httpapi/response"
+	v1 "github.com/aicomp/ai-virtual-chat/backend/internal/httpapi/v1"
 	"github.com/aicomp/ai-virtual-chat/backend/internal/services"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -13,11 +16,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
-
-type Logger interface {
-	Println(v ...any)
-	Printf(format string, v ...any)
-}
 
 type Dependencies struct {
 	Postgres *pgxpool.Pool
@@ -27,11 +25,11 @@ type Dependencies struct {
 
 type API struct {
 	cfg     *config.Config
-	logger  Logger
+	logger  contracts.Logger
 	service *services.AppService
 }
 
-func New(cfg *config.Config, logger Logger, deps Dependencies) *API {
+func New(cfg *config.Config, logger contracts.Logger, deps Dependencies) *API {
 	return &API{
 		cfg:     cfg,
 		logger:  logger,
@@ -39,6 +37,7 @@ func New(cfg *config.Config, logger Logger, deps Dependencies) *API {
 	}
 }
 
+// Routes sets up all HTTP routes
 func (api *API) Routes() http.Handler {
 	router := chi.NewRouter()
 
@@ -56,53 +55,21 @@ func (api *API) Routes() http.Handler {
 		MaxAge:           300,
 	}))
 
-	router.Get("/healthz", api.handleHealth)
+	// Health check (no versioning)
+	router.Get("/healthz", api.HandleHealth)
 
-	router.Route("/api", func(r chi.Router) {
-		r.Post("/auth/register", api.handleRegister)
-		r.Post("/auth/login", api.handleLogin)
-		r.Post("/auth/refresh", api.handleRefresh)
+	// Versioned API routes
+	router.Route("/api/v1", func(r chi.Router) {
+		v1API := v1.NewAPI(api)
+		r.Mount("/", v1API.Routes())
 
-		r.Group(func(pr chi.Router) {
-			pr.Use(api.authMiddleware)
-
-			pr.Get("/auth/session", api.handleGetSession)
-			pr.Post("/auth/logout", api.handleLogout)
-			pr.Get("/dashboard/overview", api.handleGetDashboardOverview)
-
-			pr.Route("/meetings", func(r chi.Router) {
-				r.Get("/", api.handleListMeetings)
-				r.Post("/", api.handleCreateMeeting)
-
-				r.Route("/{meetingID}", func(r chi.Router) {
-					r.Get("/", api.handleGetMeeting)
-					r.Patch("/", api.handleUpdateMeeting)
-					r.Delete("/", api.handleDeleteMeeting)
-					r.Post("/start", api.handleStartMeeting)
-					r.Post("/join", api.handleJoinMeeting)
-				})
-			})
-
-			pr.Get("/history", api.handleListTranscripts)
-			pr.Get("/history/{transcriptID}", api.handleGetTranscript)
-
-			pr.Route("/settings", func(r chi.Router) {
-				r.Get("/", api.handleGetSettings)
-				r.Put("/", api.handleUpdateSettings)
-				r.Get("/presets", api.handleListVoicePresets)
-				r.Post("/presets", api.handleCreateVoicePreset)
-				r.Route("/presets/{presetID}", func(r chi.Router) {
-					r.Put("/", api.handleUpdateVoicePreset)
-					r.Delete("/", api.handleDeleteVoicePreset)
-				})
-			})
-		})
 	})
 
 	return router
 }
 
-func (api *API) respondJSON(w http.ResponseWriter, status int, payload any) {
+// RespondJSON writes a JSON response
+func (api *API) RespondJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if payload == nil {
@@ -111,6 +78,52 @@ func (api *API) respondJSON(w http.ResponseWriter, status int, payload any) {
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
-func (api *API) respondError(w http.ResponseWriter, status int, msg string) {
-	api.respondJSON(w, status, APIError{Message: msg})
+// RespondError writes an error response
+func (api *API) RespondError(w http.ResponseWriter, status int, msg string) {
+	api.RespondJSON(w, status, APIError{Message: msg})
+}
+
+// Service returns the app service
+func (api *API) Service() *services.AppService {
+	return api.service
+}
+
+// Logger returns the logger
+func (api *API) Logger() contracts.Logger {
+	return api.logger
+}
+
+// Cfg returns the config
+func (api *API) Cfg() *config.Config {
+	return api.cfg
+}
+
+// EnsureService checks if service is available
+func (api *API) EnsureService(w http.ResponseWriter) bool {
+	if api.service != nil {
+		return true
+	}
+	api.RespondError(w, http.StatusServiceUnavailable, "service unavailable")
+	return false
+}
+
+// RespondServiceError handles service errors with appropriate status codes
+func (api *API) RespondServiceError(w http.ResponseWriter, err error) {
+	if err == nil {
+		return
+	}
+
+	status := response.StatusFromError(err)
+	if status >= http.StatusInternalServerError {
+		api.logger.Printf("service error: %v", err)
+		api.RespondError(w, status, "internal server error")
+		return
+	}
+
+	api.RespondError(w, status, err.Error())
+}
+
+// HandleHealth handles GET /healthz
+func (api *API) HandleHealth(w http.ResponseWriter, r *http.Request) {
+	api.RespondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
