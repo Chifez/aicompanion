@@ -7,6 +7,7 @@ import (
 
 	"github.com/aicomp/ai-virtual-chat/backend/internal/config"
 	"github.com/aicomp/ai-virtual-chat/backend/internal/httpapi/contracts"
+	httpapimiddleware "github.com/aicomp/ai-virtual-chat/backend/internal/httpapi/middleware"
 	"github.com/aicomp/ai-virtual-chat/backend/internal/httpapi/response"
 	v1 "github.com/aicomp/ai-virtual-chat/backend/internal/httpapi/v1"
 	"github.com/aicomp/ai-virtual-chat/backend/internal/services"
@@ -24,16 +25,20 @@ type Dependencies struct {
 }
 
 type API struct {
-	cfg     *config.Config
-	logger  contracts.Logger
-	service *services.AppService
+	cfg         *config.Config
+	logger      contracts.Logger
+	service     *services.AppService
+	rateLimiter *RateLimiter
 }
 
 func New(cfg *config.Config, logger contracts.Logger, deps Dependencies) *API {
+	rateLimiter := NewRateLimiter(logger)
+
 	return &API{
-		cfg:     cfg,
-		logger:  logger,
-		service: deps.Service,
+		cfg:         cfg,
+		logger:      logger,
+		service:     deps.Service,
+		rateLimiter: rateLimiter,
 	}
 }
 
@@ -45,6 +50,15 @@ func (api *API) Routes() http.Handler {
 	router.Use(middleware.RealIP)
 	router.Use(middleware.Recoverer)
 	router.Use(middleware.Timeout(60 * time.Second))
+
+	// Security middleware
+	router.Use(httpapimiddleware.MaxBodySize(httpapimiddleware.DefaultMaxBodySize))
+	router.Use(httpapimiddleware.ContentTypeJSON)
+
+	// Rate limiting - should be after auth middleware for user-based limiting
+	// But we apply it globally, and it will check auth context if available
+	router.Use(api.rateLimiter.Middleware())
+
 	router.Use(cors.Handler(cors.Options{
 		// In development, allow the Vite/React dev server origins.
 		// In production, this should be restricted to your real frontend origin.
@@ -126,4 +140,11 @@ func (api *API) RespondServiceError(w http.ResponseWriter, err error) {
 // HandleHealth handles GET /healthz
 func (api *API) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	api.RespondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// Stop stops background processes (rate limiter cleanup)
+func (api *API) Stop() {
+	if api.rateLimiter != nil {
+		api.rateLimiter.Stop()
+	}
 }

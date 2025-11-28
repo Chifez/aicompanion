@@ -26,6 +26,7 @@ type Server struct {
 	cfg    *config.Config
 	logger Logger
 	http   *http.Server
+	api    *httpapi.API
 	pg     *pgxpool.Pool
 	redis  *redis.Client
 }
@@ -90,6 +91,7 @@ func New(cfg *config.Config, logger Logger) (*Server, error) {
 		cfg:    cfg,
 		logger: logger,
 		http:   httpServer,
+		api:    api,
 		pg:     pgPool,
 		redis:  redisClient,
 	}, nil
@@ -101,6 +103,11 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) Stop(ctx context.Context) error {
+	// Stop API background processes (rate limiter cleanup)
+	if s.api != nil {
+		s.api.Stop()
+	}
+
 	err := s.http.Shutdown(ctx)
 
 	if s.pg != nil {

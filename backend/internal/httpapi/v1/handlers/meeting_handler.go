@@ -20,7 +20,9 @@ func HandleListMeetings(api contracts.V1APIInterface) http.HandlerFunc {
 			return
 		}
 
-		resp, err := api.Service().ListMeetings(r.Context())
+		userID := httpapicontext.UserIDFromContext(r.Context())
+
+		resp, err := api.Service().ListMeetings(r.Context(), userID)
 		if err != nil {
 			api.Logger().Printf("list meetings service error: %v", err)
 			response.Error(w, http.StatusInternalServerError, "failed to load meetings")
@@ -63,15 +65,30 @@ func HandleGetMeeting(api contracts.V1APIInterface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		meetingID := chi.URLParam(r, "meetingID")
+		if err := utils.ValidateID(meetingID); err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
 
 		if !api.EnsureService(w) {
 			return
 		}
 
+		userID := httpapicontext.UserIDFromContext(r.Context())
+
 		detail, err := api.Service().GetMeeting(r.Context(), meetingID)
 		if err != nil {
 			api.RespondServiceError(w, err)
 			return
+		}
+
+		// Check ownership - only host can access private meetings
+		// For public meetings, we allow read access but ownership check still applies for modifications
+		if detail.Summary.Visibility == "private" {
+			if err := utils.CheckMeetingOwnership(detail.Summary.HostUserID, userID); err != nil {
+				response.Error(w, http.StatusForbidden, "unauthorized: you do not have access to this meeting")
+				return
+			}
 		}
 
 		response.JSON(w, http.StatusOK, core.MeetingDetailResponse{Meeting: *detail})
@@ -83,6 +100,10 @@ func HandleUpdateMeeting(api contracts.V1APIInterface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		meetingID := chi.URLParam(r, "meetingID")
+		if err := utils.ValidateID(meetingID); err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
 
 		var req core.MeetingUpdateRequest
 		if err := utils.DecodeJSON(r.Body, &req); err != nil {
@@ -91,6 +112,24 @@ func HandleUpdateMeeting(api contracts.V1APIInterface) http.HandlerFunc {
 		}
 
 		if !api.EnsureService(w) {
+			return
+		}
+
+		userID := httpapicontext.UserIDFromContext(r.Context())
+
+		// Check ownership and if meeting is actionable before updating
+		existing, err := api.Service().GetMeeting(r.Context(), meetingID)
+		if err != nil {
+			api.RespondServiceError(w, err)
+			return
+		}
+		if err := utils.CheckMeetingOwnership(existing.Summary.HostUserID, userID); err != nil {
+			response.Error(w, http.StatusForbidden, "unauthorized: you do not own this meeting")
+			return
+		}
+		// Validate meeting action (ended/past meetings cannot be updated)
+		if err := utils.ValidateMeetingAction(existing.Summary.Status, existing.Summary.StartTime, existing.Summary.DurationMinutes); err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
 			return
 		}
 
@@ -110,10 +149,28 @@ func HandleDeleteMeeting(api contracts.V1APIInterface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		meetingID := chi.URLParam(r, "meetingID")
+		if err := utils.ValidateID(meetingID); err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
 
 		if !api.EnsureService(w) {
 			return
 		}
+
+		userID := httpapicontext.UserIDFromContext(r.Context())
+
+		// Check ownership before deleting (deletion allowed even for ended meetings)
+		existing, err := api.Service().GetMeeting(r.Context(), meetingID)
+		if err != nil {
+			api.RespondServiceError(w, err)
+			return
+		}
+		if err := utils.CheckMeetingOwnership(existing.Summary.HostUserID, userID); err != nil {
+			response.Error(w, http.StatusForbidden, "unauthorized: you do not own this meeting")
+			return
+		}
+		// Note: Deletion is allowed for ended/past meetings, so we don't validate action here
 
 		if err := api.Service().DeleteMeeting(r.Context(), meetingID); err != nil {
 			api.RespondServiceError(w, err)
@@ -129,12 +186,35 @@ func HandleStartMeeting(api contracts.V1APIInterface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		meetingID := chi.URLParam(r, "meetingID")
+		if err := utils.ValidateID(meetingID); err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
 
 		if !api.EnsureService(w) {
 			return
 		}
 
 		userID := httpapicontext.UserIDFromContext(r.Context())
+
+		// Check if meeting exists and is actionable before attempting to start
+		existing, err := api.Service().GetMeeting(r.Context(), meetingID)
+		if err != nil {
+			api.RespondServiceError(w, err)
+			return
+		}
+
+		// Validate meeting action (check if ended or past)
+		if err := utils.ValidateMeetingAction(existing.Summary.Status, existing.Summary.StartTime, existing.Summary.DurationMinutes); err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		// Check ownership
+		if err := utils.CheckMeetingOwnership(existing.Summary.HostUserID, userID); err != nil {
+			response.Error(w, http.StatusForbidden, "unauthorized: you do not own this meeting")
+			return
+		}
 
 		detail, err := api.Service().StartMeeting(r.Context(), meetingID, userID)
 		if err != nil {
@@ -151,6 +231,10 @@ func HandleJoinMeeting(api contracts.V1APIInterface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		meetingID := chi.URLParam(r, "meetingID")
+		if err := utils.ValidateID(meetingID); err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
 
 		if !api.EnsureService(w) {
 			return

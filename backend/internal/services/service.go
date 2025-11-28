@@ -25,8 +25,7 @@ func NewAppService(db *pgxpool.Pool) *AppService {
 }
 
 const (
-	accessTokenTTL  = 15 * time.Minute
-	refreshTokenTTL = 7 * 24 * time.Hour
+	refreshTokenTTL = 7 * 24 * time.Hour // Used for session token expiration
 )
 
 func generateRandomHex(bytesLen int) (string, error) {
@@ -386,11 +385,12 @@ func (s *AppService) ValidateSession(ctx context.Context, sessionID string) (str
 	return userID, nil
 }
 
-func (s *AppService) GetDashboardOverview(ctx context.Context) (*core.DashboardOverviewResponse, error) {
+func (s *AppService) GetDashboardOverview(ctx context.Context, userID string) (*core.DashboardOverviewResponse, error) {
 	if err := s.ensureDB(); err != nil {
 		return nil, err
 	}
 
+	userID = strings.TrimSpace(userID)
 	overview := core.DashboardOverviewResponse{}
 
 	var (
@@ -403,17 +403,20 @@ func (s *AppService) GetDashboardOverview(ctx context.Context) (*core.DashboardO
 		action    string
 	)
 
+	// Get most recent session for this user
 	err := s.db.QueryRow(ctx, `
-		SELECT id::text,
-			   title,
-			   COALESCE(focus, ''),
-			   started_at,
-			   duration_minutes,
-			   COALESCE(sentiment, ''),
-			   COALESCE(action_summary, '')
-		  FROM sessions
-		 ORDER BY started_at DESC
-		 LIMIT 1`).Scan(&sessionID, &title, &focus, &startedAt, &duration, &sentiment, &action)
+		SELECT s.id::text,
+			   s.title,
+			   COALESCE(s.focus, ''),
+			   s.started_at,
+			   s.duration_minutes,
+			   COALESCE(s.sentiment, ''),
+			   COALESCE(s.action_summary, '')
+		  FROM sessions s
+		  LEFT JOIN meetings m ON m.id = s.meeting_id
+		 WHERE (m.host_user_id::text = $1 OR m.host_user_id IS NULL)
+		 ORDER BY s.started_at DESC
+		 LIMIT 1`, userID).Scan(&sessionID, &title, &focus, &startedAt, &duration, &sentiment, &action)
 
 	if err == nil {
 		overview.Spotlight = core.DashboardSpotlight{
@@ -423,99 +426,154 @@ func (s *AppService) GetDashboardOverview(ctx context.Context) (*core.DashboardO
 		_ = s.db.QueryRow(ctx, `SELECT id::text FROM transcripts WHERE session_id::text = $1 LIMIT 1`, sessionID).Scan(&overview.Spotlight.TranscriptID)
 	}
 
-	// Get next meeting details for upcoming focus
+	// Get next meeting details for upcoming focus (user-specific)
 	var nextMeetingTitle string
 	var nextMeetingDuration int
-	var meetingFound bool
-	
-	nextMeetingTime := s.nextMeetingStart(ctx)
+	var nextMeetingTime time.Time
+
 	err = s.db.QueryRow(ctx, `
-		SELECT title, duration_minutes
+		SELECT title, duration_minutes, start_time
 		FROM meetings
-		WHERE start_time >= NOW()
+		WHERE host_user_id::text = $1
+		  AND start_time >= NOW()
 		  AND status IN ('scheduled', 'instant')
 		ORDER BY start_time
 		LIMIT 1
-	`).Scan(&nextMeetingTitle, &nextMeetingDuration)
-	
-	meetingFound = (err == nil)
-	
-	// Only use defaults if a meeting was found but has missing data
-	if meetingFound {
+	`, userID).Scan(&nextMeetingTitle, &nextMeetingDuration, &nextMeetingTime)
+
+	if err == nil {
+		// Only set defaults if meeting exists but has missing data
 		if nextMeetingTitle == "" {
 			nextMeetingTitle = "Upcoming session"
 		}
-		// Only default duration if meeting exists but duration is 0 or null
 		if nextMeetingDuration == 0 {
 			nextMeetingDuration = 45
 		}
+		overview.UpcomingFocus = core.DashboardUpcomingFocus{
+			FocusArea: nextMeetingTitle,
+			StartTime: nextMeetingTime,
+			Duration:  nextMeetingDuration,
+		}
 	} else {
-		// No meeting found - use fallback values
-		nextMeetingTitle = "Upcoming session"
-		nextMeetingDuration = 45
+		// No meeting found - return empty (frontend will show empty state)
+		overview.UpcomingFocus = core.DashboardUpcomingFocus{
+			FocusArea: "",
+			StartTime: time.Time{},
+			Duration:  0,
+		}
 	}
 
-	overview.UpcomingFocus = core.DashboardUpcomingFocus{
-		FocusArea: nextMeetingTitle,
-		StartTime: nextMeetingTime,
-		Duration:  nextMeetingDuration,
-	}
-
-	overview.Streak = s.sessionStreak(ctx)
-	overview.InsightMetrics = s.dashboardMetrics(ctx)
-	overview.RecentSessions = s.recentSessions(ctx)
+	overview.Streak = s.sessionStreak(ctx, userID)
+	overview.InsightMetrics = s.dashboardMetrics(ctx, userID)
+	overview.RecentSessions = s.recentSessions(ctx, userID)
 
 	return &overview, nil
 }
 
-func (s *AppService) nextMeetingStart(ctx context.Context) time.Time {
-	var ts time.Time
-	if err := s.db.QueryRow(ctx, `
-		SELECT start_time
-		  FROM meetings
-		 WHERE start_time >= NOW()
-		   AND status IN ('scheduled', 'instant')
-		 ORDER BY start_time
-		 LIMIT 1`).Scan(&ts); err != nil || ts.IsZero() {
-		return time.Now().Add(6 * time.Hour)
-	}
-	return ts
+// nextMeetingStart is now handled inline in GetDashboardOverview with user filtering
+
+func (s *AppService) sessionStreak(ctx context.Context, userID string) core.DashboardStreak {
+	userID = strings.TrimSpace(userID)
+	var thisWeek int
+	_ = s.db.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT s.id)
+		  FROM sessions s
+		  LEFT JOIN meetings m ON m.id = s.meeting_id
+		 WHERE (m.host_user_id::text = $1 OR m.host_user_id IS NULL)
+		   AND s.started_at >= NOW() - INTERVAL '7 days'`,
+		userID,
+	).Scan(&thisWeek)
+
+	// Calculate longest streak: consecutive days with at least one session
+	var longestStreak int
+	_ = s.db.QueryRow(ctx, `
+		WITH daily_sessions AS (
+			SELECT DISTINCT DATE(s.started_at) as session_date
+			FROM sessions s
+			LEFT JOIN meetings m ON m.id = s.meeting_id
+			WHERE (m.host_user_id::text = $1 OR m.host_user_id IS NULL)
+		),
+		streaks AS (
+			SELECT 
+				session_date,
+				session_date - ROW_NUMBER() OVER (ORDER BY session_date)::int as streak_group
+			FROM daily_sessions
+		)
+		SELECT COALESCE(MAX(streak_length), 0)
+		FROM (
+			SELECT COUNT(*) as streak_length
+			FROM streaks
+			GROUP BY streak_group
+		) streak_lengths`,
+		userID,
+	).Scan(&longestStreak)
+
+	return core.DashboardStreak{Current: thisWeek, Longest: longestStreak}
 }
 
-func (s *AppService) sessionStreak(ctx context.Context) core.DashboardStreak {
-	var total, thisWeek int
-	_ = s.db.QueryRow(ctx, `SELECT COUNT(*) FROM sessions`).Scan(&total)
-	_ = s.db.QueryRow(ctx, `SELECT COUNT(*) FROM sessions WHERE started_at >= NOW() - INTERVAL '7 days'`).Scan(&thisWeek)
-	if total == 0 {
-		total = 1
-	}
-	if thisWeek == 0 {
-		thisWeek = 1
-	}
-	return core.DashboardStreak{Current: thisWeek, Longest: total}
-}
-
-func (s *AppService) dashboardMetrics(ctx context.Context) []core.InsightMetric {
+func (s *AppService) dashboardMetrics(ctx context.Context, userID string) []core.InsightMetric {
+	userID = strings.TrimSpace(userID)
 	var sessionCount, highlightCount int
 	var sessionCountLastWeek, highlightCountLastWeek int
+	var actionItemCount, actionItemCompleted int
 
-	// Current week counts
-	_ = s.db.QueryRow(ctx, `SELECT COUNT(*) FROM sessions`).Scan(&sessionCount)
-	_ = s.db.QueryRow(ctx, `SELECT COUNT(*) FROM transcript_highlights`).Scan(&highlightCount)
+	// Current week counts (user-specific)
+	_ = s.db.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT s.id)
+		  FROM sessions s
+		  LEFT JOIN meetings m ON m.id = s.meeting_id
+		 WHERE (m.host_user_id::text = $1 OR m.host_user_id IS NULL)`,
+		userID,
+	).Scan(&sessionCount)
 
-	// Last week counts (7-14 days ago)
 	_ = s.db.QueryRow(ctx, `
-		SELECT COUNT(*) FROM sessions 
-		WHERE started_at >= NOW() - INTERVAL '14 days' 
-		AND started_at < NOW() - INTERVAL '7 days'
-	`).Scan(&sessionCountLastWeek)
+		SELECT COUNT(*)
+		  FROM transcript_highlights th
+		  JOIN transcripts t ON t.id = th.transcript_id
+		  JOIN sessions s ON s.id = t.session_id
+		  LEFT JOIN meetings m ON m.id = s.meeting_id
+		 WHERE (m.host_user_id::text = $1 OR m.host_user_id IS NULL)`,
+		userID,
+	).Scan(&highlightCount)
+
+	// Action items: count total and completed from transcript_highlights (user-specific)
 	_ = s.db.QueryRow(ctx, `
-		SELECT COUNT(*) FROM transcript_highlights th
+		SELECT 
+			COUNT(*) FILTER (WHERE th.action_item = TRUE),
+			COUNT(*) FILTER (WHERE th.action_item = TRUE AND EXISTS(
+				SELECT 1 FROM session_feedback sf 
+				WHERE sf.session_id = s.id AND sf.rating >= 4
+			))
+		FROM transcript_highlights th
 		JOIN transcripts t ON t.id = th.transcript_id
 		JOIN sessions s ON s.id = t.session_id
-		WHERE s.started_at >= NOW() - INTERVAL '14 days' 
-		AND s.started_at < NOW() - INTERVAL '7 days'
-	`).Scan(&highlightCountLastWeek)
+		LEFT JOIN meetings m ON m.id = s.meeting_id
+		WHERE (m.host_user_id::text = $1 OR m.host_user_id IS NULL)`,
+		userID,
+	).Scan(&actionItemCount, &actionItemCompleted)
+
+	// Last week counts (7-14 days ago, user-specific)
+	_ = s.db.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT s.id)
+		  FROM sessions s
+		  LEFT JOIN meetings m ON m.id = s.meeting_id
+		 WHERE (m.host_user_id::text = $1 OR m.host_user_id IS NULL)
+		   AND s.started_at >= NOW() - INTERVAL '14 days' 
+		   AND s.started_at < NOW() - INTERVAL '7 days'`,
+		userID,
+	).Scan(&sessionCountLastWeek)
+
+	_ = s.db.QueryRow(ctx, `
+		SELECT COUNT(*)
+		  FROM transcript_highlights th
+		  JOIN transcripts t ON t.id = th.transcript_id
+		  JOIN sessions s ON s.id = t.session_id
+		  LEFT JOIN meetings m ON m.id = s.meeting_id
+		 WHERE (m.host_user_id::text = $1 OR m.host_user_id IS NULL)
+		   AND s.started_at >= NOW() - INTERVAL '14 days' 
+		   AND s.started_at < NOW() - INTERVAL '7 days'`,
+		userID,
+	).Scan(&highlightCountLastWeek)
 
 	// Calculate deltas
 	sessionDelta := float64(sessionCount - sessionCountLastWeek)
@@ -536,14 +594,30 @@ func (s *AppService) dashboardMetrics(ctx context.Context) []core.InsightMetric 
 		highlightDirection = "neutral"
 	}
 
+	// Calculate action follow-through percentage
+	var actionFollowThrough string
+	var actionDelta float64
+	actionDirection := "neutral"
+
+	if actionItemCount > 0 {
+		completionRate := float64(actionItemCompleted) * 100.0 / float64(actionItemCount)
+		actionFollowThrough = fmt.Sprintf("%.0f%%", completionRate)
+	} else {
+		actionFollowThrough = "0%"
+	}
+
+	// Calculate action delta (simplified - would need historical data for real comparison)
+	actionDelta = 0.0 // Placeholder until we have historical action item tracking
+
 	return []core.InsightMetric{
 		{ID: "sentiment", Label: "Sessions captured", Value: fmt.Sprintf("%d sessions", sessionCount), Delta: sessionDelta, Direction: sessionDirection},
 		{ID: "context", Label: "Transcript insights", Value: fmt.Sprintf("%d highlights", highlightCount), Delta: highlightDelta, Direction: highlightDirection},
-		{ID: "actions", Label: "Action follow-through", Value: "86%", Delta: -3, Direction: "down"}, // Keep hardcoded until action_items table exists
+		{ID: "actions", Label: "Action follow-through", Value: actionFollowThrough, Delta: actionDelta, Direction: actionDirection},
 	}
 }
 
-func (s *AppService) recentSessions(ctx context.Context) []core.SessionSummary {
+func (s *AppService) recentSessions(ctx context.Context, userID string) []core.SessionSummary {
+	userID = strings.TrimSpace(userID)
 	rows, err := s.db.Query(ctx, `
 		SELECT s.id::text,
 			   s.title,
@@ -557,9 +631,10 @@ func (s *AppService) recentSessions(ctx context.Context) []core.SessionSummary {
 		  FROM sessions s
 		  LEFT JOIN meetings m ON m.id = s.meeting_id
 		  LEFT JOIN meeting_participants mp ON mp.meeting_id = m.id
+		 WHERE (m.host_user_id::text = $1 OR m.host_user_id IS NULL)
 		 GROUP BY s.id
 		 ORDER BY s.started_at DESC
-		 LIMIT 4`)
+		 LIMIT 4`, userID)
 	if err != nil {
 		return nil
 	}
@@ -587,12 +662,14 @@ func (s *AppService) recentSessions(ctx context.Context) []core.SessionSummary {
 	return sessions
 }
 
-func (s *AppService) ListMeetings(ctx context.Context) (*core.MeetingsResponse, error) {
+func (s *AppService) ListMeetings(ctx context.Context, userID string) (*core.MeetingsResponse, error) {
 	if err := s.ensureDB(); err != nil {
 		return nil, err
 	}
 
-	rows, err := s.db.Query(ctx, `
+	userID = strings.TrimSpace(userID)
+	// Filter by userID if provided, otherwise return all (for backward compatibility)
+	query := `
 		SELECT COALESCE(external_id, id::text),
 			   title,
 			   COALESCE(description, ''),
@@ -601,20 +678,36 @@ func (s *AppService) ListMeetings(ctx context.Context) (*core.MeetingsResponse, 
 			   COALESCE(voice_profile, ''),
 			   status,
 			   COALESCE(visibility, 'private')
-		  FROM meetings
-		 ORDER BY start_time DESC`)
+		  FROM meetings`
+	args := []any{}
+
+	if userID != "" {
+		query += ` WHERE host_user_id::text = $1`
+		args = append(args, userID)
+	}
+
+	query += ` ORDER BY start_time DESC`
+
+	rows, err := s.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
+	// Compute real session health metrics
+	sessionHealth, err := s.computeSessionHealthMetrics(ctx, userID)
+	if err != nil {
+		// If computation fails, use empty metrics (frontend will show empty state)
+		sessionHealth = core.SessionHealthMetrics{
+			ConversationBalance: "0% / 0%",
+			AverageLatencyMs:    0,
+			FeedbackScore:       0.0,
+			Trend:               "neutral",
+		}
+	}
+
 	resp := &core.MeetingsResponse{
-		SessionHealth: core.SessionHealthMetrics{
-			ConversationBalance: "58% / 42%",
-			AverageLatencyMs:    210,
-			FeedbackScore:       4.6,
-			Trend:               "up",
-		},
+		SessionHealth: sessionHealth,
 		QuickStartTemplates: []core.QuickStartTemplate{
 			{ID: "template-retro", Title: "Retro reboot", Description: "Re-energize your retros with AI prompts.", Badge: "Popular"},
 			{ID: "template-product", Title: "Product narrative", Description: "Pressure-test the story before investor updates.", Badge: "AI guided"},
@@ -799,14 +892,17 @@ func (s *AppService) GetTranscript(ctx context.Context, transcriptID string) (*c
 	}
 
 	var detail core.TranscriptDetailResponse
+	var hostUserID string
 	if err := s.db.QueryRow(ctx, `
 		SELECT t.id::text,
 			   s.title,
 			   t.created_at,
 			   s.duration_minutes,
-			   COALESCE(t.confidence, 0)
+			   COALESCE(t.confidence, 0),
+			   COALESCE(m.host_user_id::text, '')
 		  FROM transcripts t
 		  JOIN sessions s ON s.id = t.session_id
+		  LEFT JOIN meetings m ON m.id = s.meeting_id
 		 WHERE t.id::text = $1
 		 LIMIT 1`, transcriptID).Scan(
 		&detail.Transcript.Summary.ID,
@@ -814,6 +910,7 @@ func (s *AppService) GetTranscript(ctx context.Context, transcriptID string) (*c
 		&detail.Transcript.Summary.CreatedAt,
 		&detail.Transcript.Summary.DurationMinutes,
 		&detail.Transcript.Summary.SentimentScore,
+		&hostUserID,
 	); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, fmt.Errorf("transcript not found")
@@ -858,6 +955,48 @@ func (s *AppService) GetTranscript(ctx context.Context, transcriptID string) (*c
 	}
 
 	return &detail, nil
+}
+
+// CheckTranscriptOwnership checks if a user owns a transcript (via meeting host)
+func (s *AppService) CheckTranscriptOwnership(ctx context.Context, transcriptID, userID string) error {
+	if err := s.ensureDB(); err != nil {
+		return err
+	}
+
+	transcriptID = strings.TrimSpace(transcriptID)
+	userID = strings.TrimSpace(userID)
+
+	if transcriptID == "" {
+		return fmt.Errorf("transcript ID is required")
+	}
+	if userID == "" {
+		return fmt.Errorf("user ID is required")
+	}
+
+	var hostUserID string
+	if err := s.db.QueryRow(ctx, `
+		SELECT COALESCE(m.host_user_id::text, '')
+		  FROM transcripts t
+		  JOIN sessions s ON s.id = t.session_id
+		  LEFT JOIN meetings m ON m.id = s.meeting_id
+		 WHERE t.id::text = $1
+		 LIMIT 1`, transcriptID).Scan(&hostUserID); err != nil {
+		if err == pgx.ErrNoRows {
+			return fmt.Errorf("transcript not found")
+		}
+		return err
+	}
+
+	// If no host is set (legacy transcript), allow access
+	if hostUserID == "" {
+		return nil
+	}
+
+	if hostUserID != userID {
+		return fmt.Errorf("unauthorized: user does not own this transcript")
+	}
+
+	return nil
 }
 
 func (s *AppService) GetSettings(ctx context.Context, userID string) (*core.SettingsResponse, error) {

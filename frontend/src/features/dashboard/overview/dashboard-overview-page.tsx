@@ -57,10 +57,7 @@ export function DashboardOverviewPage() {
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-8">
       <header className="grid gap-6 lg:grid-cols-[2fr_1fr]">
         <SessionSpotlightCard
-          quote={
-            data.spotlight.quote ||
-            'Your AI companion is ready with a fresh recap.'
-          }
+          quote={data.spotlight.quote || ''}
           ctaLabel="View transcript"
           onViewTranscript={() => {
             if (data.spotlight.transcriptId) {

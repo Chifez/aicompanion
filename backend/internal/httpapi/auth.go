@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aicomp/ai-virtual-chat/backend/internal/httpapi/context"
+	httpapicontext "github.com/aicomp/ai-virtual-chat/backend/internal/httpapi/context"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -15,38 +15,59 @@ const accessTokenTTL = 15 * time.Minute // Increased to 30 minutes for better UX
 // Cookie helper functions
 // SetAccessTokenCookie sets the access token cookie
 func (api *API) SetAccessTokenCookie(w http.ResponseWriter, token string) {
+	// Secure flag should only be true in production (HTTPS required)
+	// In development, we need Secure=false for localhost
+	secure := false
+	Samesite := http.SameSiteLaxMode
+
+	if api.cfg.Env == "production" {
+		Samesite = http.SameSiteNoneMode
+		secure = true
+	}
+
 	http.SetCookie(w, &http.Cookie{
 		Name:     "nl_access",
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   true,                  // HTTPS in production
-		SameSite: http.SameSiteNoneMode, // Cross-site for localhost:3000 -> localhost:8080
+		Secure:   secure,
+		SameSite: Samesite, // Cross-site for localhost:3000 -> localhost:8080
 		MaxAge:   int(accessTokenTTL.Seconds()),
 	})
 }
 
 // SetRefreshTokenCookie sets the refresh token cookie
 func (api *API) SetRefreshTokenCookie(w http.ResponseWriter, token string, expiresAt time.Time) {
+	// Secure flag should only be true in production (HTTPS required)
+	secure := false
+	Samesite := http.SameSiteLaxMode
+
+	if api.cfg.Env == "production" {
+		Samesite = http.SameSiteNoneMode
+		secure = true
+	}
+
 	http.SetCookie(w, &http.Cookie{
 		Name:     "nl_refresh",
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteNoneMode,
+		Secure:   secure,
+		SameSite: Samesite,
 		Expires:  expiresAt,
 	})
 }
 
 // ClearAuthCookies clears both access and refresh token cookies
 func (api *API) ClearAuthCookies(w http.ResponseWriter) {
+	secure := api.cfg.Env == "production"
+
 	http.SetCookie(w, &http.Cookie{
 		Name:     "nl_access",
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   secure,
 		SameSite: http.SameSiteNoneMode,
 		MaxAge:   -1,
 	})
@@ -55,7 +76,7 @@ func (api *API) ClearAuthCookies(w http.ResponseWriter) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   secure,
 		SameSite: http.SameSiteNoneMode,
 		MaxAge:   -1,
 	})
@@ -86,9 +107,13 @@ func (api *API) AuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Local development escape hatch: allow using the raw secret directly.
-		if tokenString == secret {
-			next.ServeHTTP(w, r)
+		// Development escape hatch: only allow in development environment
+		// This bypasses JWT validation for local development only
+		// WARNING: This should NEVER be enabled in production
+		if api.cfg.Env == "development" && tokenString == secret {
+			// In development, set a dummy user context for testing
+			ctx := httpapicontext.WithAuthContext(r.Context(), "dev-user", "dev-session")
+			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
 
@@ -150,7 +175,7 @@ func (api *API) AuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		ctx := context.WithAuthContext(r.Context(), userID, sessionID)
+		ctx := httpapicontext.WithAuthContext(r.Context(), userID, sessionID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

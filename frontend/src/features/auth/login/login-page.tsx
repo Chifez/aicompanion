@@ -8,6 +8,7 @@ import { AuthForm } from '../components/auth-form';
 import { AuthFormField } from '../components/auth-form-field';
 import { AuthFooter } from '../components/auth-footer';
 import { useAuthRoute } from '../hooks/use-auth-route';
+import { sanitizeRedirectUrl } from '@/lib/url-utils';
 
 export function LoginPage() {
   const queryClient = useQueryClient();
@@ -25,8 +26,7 @@ export function LoginPage() {
     mutationFn: () => login({ email, password }),
     onSuccess: async () => {
       await queryClient.invalidateQueries();
-      const targetPath =
-        redirectTo && redirectTo.startsWith('/') ? redirectTo : '/dashboard';
+      const targetPath = sanitizeRedirectUrl(redirectTo);
       navigate({ to: targetPath });
     },
   });

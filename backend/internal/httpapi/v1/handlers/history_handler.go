@@ -3,8 +3,10 @@ package handlers
 import (
 	"net/http"
 
+	httpapicontext "github.com/aicomp/ai-virtual-chat/backend/internal/httpapi/context"
 	"github.com/aicomp/ai-virtual-chat/backend/internal/httpapi/contracts"
 	"github.com/aicomp/ai-virtual-chat/backend/internal/httpapi/response"
+	"github.com/aicomp/ai-virtual-chat/backend/internal/httpapi/utils"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -32,8 +34,24 @@ func HandleGetTranscript(api contracts.V1APIInterface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		transcriptID := chi.URLParam(r, "transcriptID")
+		if err := utils.ValidateID(transcriptID); err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
 
 		if !api.EnsureService(w) {
+			return
+		}
+
+		userID := httpapicontext.UserIDFromContext(r.Context())
+
+		// Check ownership before fetching transcript details
+		if err := api.Service().CheckTranscriptOwnership(r.Context(), transcriptID, userID); err != nil {
+			if err.Error() == "transcript not found" {
+				response.Error(w, http.StatusNotFound, err.Error())
+			} else {
+				response.Error(w, http.StatusForbidden, "unauthorized: you do not own this transcript")
+			}
 			return
 		}
 

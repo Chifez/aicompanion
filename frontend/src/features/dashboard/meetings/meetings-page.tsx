@@ -15,6 +15,7 @@ import {
   type ScheduledMeeting,
   type MeetingFormState,
 } from './utils/transform';
+import { isMeetingActionable } from './utils/meeting-status';
 import type { MeetingsResponse } from '@/types/api';
 
 export function MeetingsPage() {
@@ -102,6 +103,11 @@ export function MeetingsPage() {
   };
 
   const handleStartMeeting = (meeting: ScheduledMeeting) => {
+    // Validate meeting is actionable before navigating
+    if (!isMeetingActionable(meeting)) {
+      // Meeting is not actionable (ended or past) - don't navigate
+      return;
+    }
     // Just take the host into the lobby; status will flip to active when they join from the lobby
     navigate({
       to: '/lobby',

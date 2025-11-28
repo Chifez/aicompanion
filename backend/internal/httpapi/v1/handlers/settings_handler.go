@@ -111,6 +111,10 @@ func HandleUpdateVoicePreset(api contracts.V1APIInterface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		presetID := chi.URLParam(r, "presetID")
+		if err := utils.ValidateID(presetID); err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
 
 		var req core.UpdateVoicePresetRequest
 		if err := utils.DecodeJSON(r.Body, &req); err != nil {
@@ -140,6 +144,10 @@ func HandleDeleteVoicePreset(api contracts.V1APIInterface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		presetID := chi.URLParam(r, "presetID")
+		if err := utils.ValidateID(presetID); err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
 
 		if !api.EnsureService(w) {
 			return
